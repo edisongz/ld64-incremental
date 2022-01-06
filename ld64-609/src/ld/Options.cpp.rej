@@ -1,0 +1,17 @@
+***************
+*** 4671,4677 ****
+  			break;
+  		case Options::kDyld:
+  			// arm64e has support for compressed LINKEDIT.
+- 			if ( (fArchitecture == CPU_TYPE_ARM64) && (fSubArchitecture == CPU_SUBTYPE_ARM64_E) )
+  				break;
+  		case Options::kPreload:
+  		case Options::kStaticExecutable:
+--- 4671,4677 ----
+  			break;
+  		case Options::kDyld:
+  			// arm64e has support for compressed LINKEDIT.
++ 			if ( (fArchitecture == CPU_TYPE_ARM64) && (fSubArchitecture == CPU_SUBTYPE_ARM64E) )
+  				break;
+  		case Options::kPreload:
+  		case Options::kStaticExecutable:
