@@ -1192,7 +1192,7 @@
 		F933D91C09291AC90083EAC8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_IDENTITY = "-";
@@ -1237,7 +1237,7 @@
 					"\"$(SRCROOT)/../cfe-8.0.1.src/include\"",
 					"\"$(SRCROOT)/../dyld-733.6/include\"",
 					"\"$(SRCROOT)/../llvm-8.0.1.src/include\"",
-					"\"$(SRCROOT)/../tapi-master/include\"",
+					"\"$(SRCROOT)/../tapi-1100.0.11/include\"",
 					"\"$(SRCROOT)/../corecrypto/include\"",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
@@ -1272,7 +1272,7 @@
 		F933D91D09291AC90083EAC8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_IDENTITY = "-";
@@ -1321,7 +1321,7 @@
 					"\"$(SRCROOT)/../cfe-8.0.1.src/include\"",
 					"\"$(SRCROOT)/../dyld-733.6/include\"",
 					"\"$(SRCROOT)/../llvm-8.0.1.src/include\"",
-					"\"$(SRCROOT)/../tapi-master/include\"",
+					"\"$(SRCROOT)/../tapi-1100.0.11/include\"",
 					"\"$(SRCROOT)/../corecrypto/include\"",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
@@ -1592,7 +1592,7 @@
 		F9849FFA10B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
 				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_IDENTITY = "-";
@@ -1640,7 +1640,7 @@
 					"\"$(SRCROOT)/../cfe-8.0.1.src/include\"",
 					"\"$(SRCROOT)/../dyld-733.6/include\"",
 					"\"$(SRCROOT)/../llvm-8.0.1.src/include\"",
-					"\"$(SRCROOT)/../tapi-master/include\"",
+					"\"$(SRCROOT)/../tapi-1100.0.11/include\"",
 					"\"$(SRCROOT)/../corecrypto/include\"",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";

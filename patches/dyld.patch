@@ -20,3 +20,4 @@ diff -Naur dyld-733.6.orig/include/mach-o/dyld_priv.h dyld-733.6/include/mach-o/
 +
  // Returns the active platform of the process
  extern dyld_platform_t dyld_get_active_platform(void) __API_AVAILABLE(macos(10.14), ios(12.0), watchos(5.0), tvos(12.0), bridgeos(3.0));
+ 

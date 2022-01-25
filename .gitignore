@@ -1,0 +1,10 @@
+
+.DS_Store
+*.xcuserstate
+ld64-609/ld64.xcodeproj/xcuserdata/tttt.xcuserdatad/xcschemes/xcschememanagement.plist
+/tapi-1100.0.11
+.buildStartTime.txt
+/dyld-733.6
+/llvm-8.0.1.src
+/cfe-8.0.1.src
+*.xcuserdatad
