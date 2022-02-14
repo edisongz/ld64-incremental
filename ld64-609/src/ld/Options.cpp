@@ -207,6 +207,7 @@ Options::Options(int argc, const char* argv[])
 	  fZeroModTimeInDebugMap(false), fBitcodeKind(kBitcodeProcess),
 	  fDebugInfoStripping(kDebugInfoMinimal), fTraceOutputFile(NULL), fPlatfromVersionCmdFound(false), fInternalSDK(false),
 	  fWarnUnusedDylibs(false), fWarnUnusedDylibsForceOn(false), fWarnUnusedDylibsForceOff(false), fAdHocSign(false),
+	  fEnableIncrementalLink(false),
 	  fPlatformMismatchesAreWarning(false),
 	  fForceObjCRelativeMethodListsOn(false), fForceObjCRelativeMethodListsOff(false), fUseObjCRelativeMethodLists(false),
 	  fSaveTempFiles(false), fLinkSnapshot(this), fSnapshotRequested(false), fPipelineFifo(NULL),
@@ -4067,6 +4068,9 @@ void Options::parse(int argc, const char* argv[])
 			}
 			else if (strcmp(arg, "-adhoc_codesign") == 0) {
 				fAdHocSign = true;
+			}
+			else if (strcmp(arg, "-incremental") == 0) {
+				fEnableIncrementalLink = true;
 			}
 			else if (strcmp(arg, "-oso_prefix") == 0) {
 				const char* path = argv[++i];

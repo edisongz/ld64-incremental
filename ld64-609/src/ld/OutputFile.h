@@ -96,6 +96,7 @@ public:
 	ld::Internal::FinalSection*	threadedPageStartsSection;
 	ld::Internal::FinalSection*	chainInfoSection;
 	ld::Internal::FinalSection*	codeSignatureSection;
+	ld::Internal::FinalSection*	incrementalSection;
 
 	struct RebaseInfo {
 						RebaseInfo(uint8_t t, uint64_t addr) : _type(t), _address(addr) {}
@@ -375,6 +376,7 @@ private:
 		  bool								_hasExternalRelocations;
 		  bool								_hasOptimizationHints;
 		  bool								_hasCodeSignature;
+		  bool								_hasIncrementalLink;
 	uint64_t								_fileSize;
 	std::map<uint64_t, uint32_t>			_lazyPointerAddressToInfoOffset;
 	uint32_t								_encryptedTEXTstartOffset;
@@ -424,6 +426,7 @@ public:
 	class LinkEditAtom*						_dataInCodeAtom;
 	class LinkEditAtom*						_optimizationHintsAtom;
 	class LinkEditAtom*						_chainedInfoAtom;
+	class LinkEditAtom*						_incrementalAtom;
 	class CodeSignatureAtom*				_codeSignatureAtom;
 
 };

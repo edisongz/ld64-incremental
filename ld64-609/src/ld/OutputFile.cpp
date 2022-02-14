@@ -91,6 +91,7 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state)
 		sectionRelocationsSection(NULL), 
 		indirectSymbolTableSection(NULL),
 		threadedPageStartsSection(NULL), codeSignatureSection(NULL),
+		incrementalSection(nullptr),
 		_options(opts),
 		_hasDyldInfo(opts.makeCompressedDyldInfo() || state.cantUseChainedFixups),
 		_hasExportsTrie(opts.makeChainedFixups() && !state.cantUseChainedFixups && _options.dyldLoadsOutput()),
@@ -106,6 +107,7 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state)
 		_hasExternalRelocations(!_hasDyldInfo && !opts.makeThreadedStartsSection()),
 		_hasOptimizationHints(opts.outputKind() == Options::kObjectFile),
 		_hasCodeSignature(opts.adHocSign()),
+		_hasIncrementalLink(opts.enableIncrementalLink()),
 		_encryptedTEXTstartOffset(0),
 		_encryptedTEXTendOffset(0),
 		_localSymbolsStartIndex(0),
@@ -128,6 +130,7 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state)
 		_functionStartsAtom(NULL),
 		_dataInCodeAtom(NULL),
 		_optimizationHintsAtom(NULL),
+		_incrementalAtom(NULL),
 		_codeSignatureAtom(NULL)
 {
 }
@@ -359,6 +362,10 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 		_codeSignatureAtom->encode();
 	}
 
+	if (_hasIncrementalLink) {
+		assert(_incrementalAtom != nullptr);
+		_incrementalAtom->encode();
+	}
 	_fileSize = state.sections.back()->fileOffset + state.sections.back()->size;
 }
 
@@ -4423,6 +4430,10 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
 			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
+			}
 			break;
 #endif
 #if SUPPORT_ARCH_x86_64
@@ -4495,6 +4506,10 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 			if ( _hasCodeSignature ) {
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
+			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
 			}
 			break;
 #endif
@@ -4569,6 +4584,10 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
 			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
+			}
 			break;
 #endif
 #if SUPPORT_ARCH_arm64
@@ -4642,6 +4661,10 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
 			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
+			}
 			break;
 #endif
 #if SUPPORT_ARCH_arm64_32
@@ -4714,6 +4737,10 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 			if ( _hasCodeSignature ) {
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
+			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
 			}
 			break;
 #endif

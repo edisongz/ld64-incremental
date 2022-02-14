@@ -46,6 +46,7 @@
 		83046A851C8FF2F700024A7E /* objcimageinfo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 83046A841C8FF2D000024A7E /* objcimageinfo.cpp */; };
 		B028FCF21A9E7C3F00E3584B /* bitcode_bundle.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B028FCF11A9E7C3F00E3584B /* bitcode_bundle.cpp */; };
 		B3B672421406D42800A376BB /* Snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B3B672411406D42800A376BB /* Snapshot.cpp */; };
+		B4374D2927BA4BC10062D67D /* incremental.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B4374D2727BA4BC10062D67D /* incremental.cpp */; };
 		C1E27B581F6B1B68003B8FA6 /* thread_starts.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C1E27B571F6B1B67003B8FA6 /* thread_starts.cpp */; };
 		C1ED154823C934E800748423 /* objc_constants.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C1ED154623C934E800748423 /* objc_constants.cpp */; };
 		DE3EC65E240ECBE4008CD445 /* ResponseFiles.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DE3EC65C240ECBE4008CD445 /* ResponseFiles.cpp */; };
@@ -254,6 +255,8 @@
 		B3B672411406D42800A376BB /* Snapshot.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; name = Snapshot.cpp; path = src/ld/Snapshot.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		B3B672441406D44300A376BB /* Snapshot.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; name = Snapshot.h; path = src/ld/Snapshot.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		B3C7A09914295B9C005FC714 /* compile_stubs */ = {isa = PBXFileReference; lastKnownFileType = text.script.csh; path = compile_stubs; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		B4374D2727BA4BC10062D67D /* incremental.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = incremental.cpp; path = src/ld/incremental.cpp; sourceTree = "<group>"; };
+		B4374D2827BA4BC10062D67D /* incremental.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; name = incremental.hpp; path = src/ld/incremental.hpp; sourceTree = "<group>"; };
 		C1E27B571F6B1B67003B8FA6 /* thread_starts.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = thread_starts.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		C1E27B591F6B1B70003B8FA6 /* thread_starts.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = thread_starts.h; sourceTree = "<group>"; };
 		C1ED154623C934E800748423 /* objc_constants.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = objc_constants.cpp; sourceTree = "<group>"; };
@@ -567,6 +570,8 @@
 				F989D44B10694F2E0014B60C /* LinkEditClassic.hpp */,
 				F9463C63244E774A009BAA3F /* libcodedirectory.c */,
 				F9463C62244E774A009BAA3F /* libcodedirectory.h */,
+				B4374D2727BA4BC10062D67D /* incremental.cpp */,
+				B4374D2827BA4BC10062D67D /* incremental.hpp */,
 				F9CC24131461FB4300A92174 /* code-sign-blobs */,
 				F9AA650B1051BD2B003E3539 /* passes */,
 				F9AA65861051E750003E3539 /* parsers */,
@@ -973,6 +978,7 @@
 				F9AA69C110583E19003E3539 /* Resolver.cpp in Sources */,
 				F989D30D106826020014B60C /* OutputFile.cpp in Sources */,
 				F9AA65111051BD2B003E3539 /* stubs.cpp in Sources */,
+				B4374D2927BA4BC10062D67D /* incremental.cpp in Sources */,
 				F9AA6786105700C2003E3539 /* opaque_section_file.cpp in Sources */,
 				F9AA67B610570C41003E3539 /* dtrace_dof.cpp in Sources */,
 				F98498A310AE2159009E9878 /* compact_unwind.cpp in Sources */,

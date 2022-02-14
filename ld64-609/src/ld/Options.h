@@ -522,6 +522,7 @@ public:
 	const std::vector<const char*>&	sdkPaths() const { return fSDKPaths; }
 	bool						internalSDK() const { return fInternalSDK; }
 	bool						adHocSign() const { return fAdHocSign; }
+	bool 						enableIncrementalLink() const { return fEnableIncrementalLink; }
 	bool						platformMismatchesAreWarning() const { return fPlatformMismatchesAreWarning; }
 	bool						warnUnusedDylibs() const { return fWarnUnusedDylibs; }
 	bool						useObjCRelativeMethodLists() const { return fUseObjCRelativeMethodLists; }
@@ -853,6 +854,7 @@ private:
 	bool								fWarnUnusedDylibsForceOn;
 	bool								fWarnUnusedDylibsForceOff;
 	bool								fAdHocSign;
+	bool 								fEnableIncrementalLink;
 	bool								fPlatformMismatchesAreWarning;
 	bool								fForceObjCRelativeMethodListsOn;
 	bool								fForceObjCRelativeMethodListsOff;

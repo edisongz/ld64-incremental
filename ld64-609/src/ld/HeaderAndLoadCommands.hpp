@@ -127,6 +127,7 @@ private:
 	uint8_t*					copyLinkerOptionsLoadCommand(uint8_t* p, const std::vector<const char*>&) const;
 	uint8_t*					copyOptimizationHintsLoadCommand(uint8_t* p) const;
 	uint8_t*					copyCodeSignatureLoadCommand(uint8_t* p) const;
+	uint8_t*					copyIncrementalLoadCommand(uint8_t* p) const;
 
 	uint32_t					sectionFlags(ld::Internal::FinalSection* sect) const;
 	bool						sectionTakesNoDiskSpace(ld::Internal::FinalSection* sect) const;
@@ -157,6 +158,7 @@ private:
 	bool						_hasExportsTrieLoadCommand;
 	bool						_hasChainedFixupsLoadCommand;
 	bool						_hasCodeSignature;
+	bool 						_hasIncrementalLink;
 	bool						_simulatorSupportDylib;
 	ld::VersionSet			 	_platforms;
 	uint32_t					_dylibLoadCommmandsCount;
@@ -205,6 +207,7 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 	_hasOptimizationHints = (_state.someObjectHasOptimizationHints && (opts.outputKind() == Options::kObjectFile));
 	_hasExportsTrieLoadCommand = opts.makeChainedFixups() && !state.cantUseChainedFixups && opts.dyldLoadsOutput();
 	_hasCodeSignature = opts.adHocSign();
+	_hasIncrementalLink = opts.enableIncrementalLink();
 	_hasChainedFixupsLoadCommand = opts.makeChainedFixups() && !state.cantUseChainedFixups && opts.dyldOrKernelLoadsOutput();
 
 	switch ( opts.outputKind() ) {
@@ -523,6 +526,9 @@ uint64_t HeaderAndLoadCommandsAtom<A>::size() const
 	if ( _hasCodeSignature )
 		sz += sizeof(macho_linkedit_data_command<P>);
 
+	if (_hasIncrementalLink) {
+		sz += sizeof(macho_linkedit_data_command<P>);
+	}
 	return sz;
 }
 
@@ -608,6 +614,9 @@ uint32_t HeaderAndLoadCommandsAtom<A>::commandsCount() const
 		++count;
 		
 	if ( _hasCodeSignature )
+		++count;
+	
+	if (_hasIncrementalLink)
 		++count;
 
 	return count;
@@ -1636,6 +1645,18 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyCodeSignatureLoadCommand(uint8_t* p) 
 }
 
 template <typename A>
+uint8_t* HeaderAndLoadCommandsAtom<A>::copyIncrementalLoadCommand(uint8_t *p) const {
+#define LC_INCREMENTAL 0x41
+	macho_linkedit_data_command<P>* cmd = (macho_linkedit_data_command<P>*)p;
+	cmd->set_cmd(LC_INCREMENTAL);
+	cmd->set_cmdsize(sizeof(macho_linkedit_data_command<P>));
+	cmd->set_dataoff(_writer.incrementalSection->fileOffset);
+	cmd->set_datasize(_writer.incrementalSection->size);
+#undef LC_INCREMENTAL
+	return p + sizeof(macho_linkedit_data_command<P>);
+}
+
+template <typename A>
 void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 {
 	macho_header<P>* mh = (macho_header<P>*)buffer;
@@ -1771,6 +1792,10 @@ void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
  
 	if ( _hasCodeSignature )
 		p = this->copyCodeSignatureLoadCommand(p);
+	
+	if (_hasIncrementalLink) {
+		p = this->copyIncrementalLoadCommand(p);
+	}
 }
 
 

@@ -2300,6 +2300,35 @@ void CodeSignatureAtom::hash(uint8_t* wholeFileBuffer) const
 		throw "error code signing";
 }
 
+class IncrementalAtom : public LinkEditAtom
+{
+public:
+												IncrementalAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+													: LinkEditAtom(opts, state, writer, _s_section, 16), _opts(opts) {
+														assert(opts.outputKind() != Options::kObjectFile);
+														this->_encoded = true;  // only works because this is last
+													}
+
+	// overrides of ld::Atom
+	virtual const char*							name() const		{ return "incremental"; }
+	// overrides of LinkEditAtom
+	virtual void								encode() const;
+
+private:
+	const Options& 				_opts;
+
+	static ld::Section			_s_section;
+
+};
+
+ld::Section IncrementalAtom::_s_section("__LINKEDIT", "__incremental", ld::Section::typeLinkEdit, true);
+
+void IncrementalAtom::encode() const
+{
+	this->_encodedData.alloc(8);
+	this->_encodedData.pad_to_size(8);
+	this->_encoded = true;
+}
 
 } // namespace tool 
 } // namespace ld 
