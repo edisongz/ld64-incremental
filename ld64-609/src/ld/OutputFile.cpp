@@ -92,6 +92,8 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state)
 		indirectSymbolTableSection(NULL),
 		threadedPageStartsSection(NULL), codeSignatureSection(NULL),
 		incrementalSection(nullptr),
+		incrementalSymTabSection(nullptr),
+		incrementalStringSection(nullptr),
 		_options(opts),
 		_hasDyldInfo(opts.makeCompressedDyldInfo() || state.cantUseChainedFixups),
 		_hasExportsTrie(opts.makeChainedFixups() && !state.cantUseChainedFixups && _options.dyldLoadsOutput()),
@@ -130,7 +132,9 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state)
 		_functionStartsAtom(NULL),
 		_dataInCodeAtom(NULL),
 		_optimizationHintsAtom(NULL),
-		_incrementalAtom(NULL),
+		_incrementalAtom(nullptr),
+		_incrementalSymTabAtom(nullptr),
+		_incrementalStringTableAtom(nullptr),
 		_codeSignatureAtom(NULL)
 {
 }
@@ -312,6 +316,15 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 		_localRelocsAtom->encode();
 	}
 
+	if (_hasIncrementalLink) {
+		assert(_incrementalAtom != nullptr);
+		_incrementalAtom->encode();
+		assert(_incrementalSymTabAtom != nullptr);
+		_incrementalSymTabAtom->encode();
+		assert(_incrementalStringTableAtom != nullptr);
+		_incrementalStringTableAtom->encode();
+	}
+	
 	// update address and file offsets now that linkedit content has been generated
 	uint64_t curLinkEditAddress = 0;
 	uint64_t curLinkEditfileOffset = 0;
@@ -356,15 +369,9 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 		curLinkEditAddress += sect->size;
 		curLinkEditfileOffset += sect->size;
 	}
-	
 	if ( _hasCodeSignature ) {
 		assert(_codeSignatureAtom != NULL);
 		_codeSignatureAtom->encode();
-	}
-
-	if (_hasIncrementalLink) {
-		assert(_incrementalAtom != nullptr);
-		_incrementalAtom->encode();
 	}
 	_fileSize = state.sections.back()->fileOffset + state.sections.back()->size;
 }
@@ -4426,13 +4433,17 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_stringPoolAtom = new StringPoolAtom(_options, state, *this, 4);
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86>(_options, state, *this);
+				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom<x86>(_options, state, *this);
+				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
+			}
 			if ( _hasCodeSignature ) {
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
-			}
-			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalAtom(_options, state, *this);
-				incrementalSection = state.addAtom(*_incrementalAtom);
 			}
 			break;
 #endif
@@ -4503,13 +4514,17 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_stringPoolAtom = new StringPoolAtom(_options, state, *this, 8);
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86_64>(_options, state, *this);
+				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom<x86_64>(_options, state, *this);
+				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
+			}
 			if ( _hasCodeSignature ) {
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
-			}
-			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalAtom(_options, state, *this);
-				incrementalSection = state.addAtom(*_incrementalAtom);
 			}
 			break;
 #endif
@@ -4580,13 +4595,17 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_stringPoolAtom = new StringPoolAtom(_options, state, *this, 4);
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm>(_options, state, *this);
+				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom<arm>(_options, state, *this);
+				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
+			}
 			if ( _hasCodeSignature ) {
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
-			}
-			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalAtom(_options, state, *this);
-				incrementalSection = state.addAtom(*_incrementalAtom);
 			}
 			break;
 #endif
@@ -4657,13 +4676,17 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_stringPoolAtom = new StringPoolAtom(_options, state, *this, 8);
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64>(_options, state, *this);
+				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom<arm64>(_options, state, *this);
+				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
+			}
 			if ( _hasCodeSignature ) {
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
-			}
-			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalAtom(_options, state, *this);
-				incrementalSection = state.addAtom(*_incrementalAtom);
 			}
 			break;
 #endif
@@ -4734,13 +4757,17 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_stringPoolAtom = new StringPoolAtom(_options, state, *this, 4);
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
+			if (_hasIncrementalLink) {
+				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64_32>(_options, state, *this);
+				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom<arm64_32>(_options, state, *this);
+				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
+			}
 			if ( _hasCodeSignature ) {
 				_codeSignatureAtom = new CodeSignatureAtom(_options, state, *this);
 				codeSignatureSection = state.addAtom(*_codeSignatureAtom);
-			}
-			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalAtom(_options, state, *this);
-				incrementalSection = state.addAtom(*_incrementalAtom);
 			}
 			break;
 #endif

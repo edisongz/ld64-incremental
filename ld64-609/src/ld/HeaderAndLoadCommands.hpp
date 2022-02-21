@@ -35,6 +35,7 @@
 #include "MachOFileAbstraction.hpp"
 #include "Options.h"
 #include "ld.hpp"
+#include "incremental.hpp"
 
 namespace ld {
 namespace tool {
@@ -527,7 +528,7 @@ uint64_t HeaderAndLoadCommandsAtom<A>::size() const
 		sz += sizeof(macho_linkedit_data_command<P>);
 
 	if (_hasIncrementalLink) {
-		sz += sizeof(macho_linkedit_data_command<P>);
+		sz += sizeof(ld::incremental::IncrementalCommand<P>);
 	}
 	return sz;
 }
@@ -616,8 +617,9 @@ uint32_t HeaderAndLoadCommandsAtom<A>::commandsCount() const
 	if ( _hasCodeSignature )
 		++count;
 	
-	if (_hasIncrementalLink)
+	if (_hasIncrementalLink) {
 		++count;
+	}
 
 	return count;
 }
@@ -1646,14 +1648,18 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyCodeSignatureLoadCommand(uint8_t* p) 
 
 template <typename A>
 uint8_t* HeaderAndLoadCommandsAtom<A>::copyIncrementalLoadCommand(uint8_t *p) const {
-#define LC_INCREMENTAL 0x41
-	macho_linkedit_data_command<P>* cmd = (macho_linkedit_data_command<P>*)p;
+	ld::incremental::IncrementalCommand<P> *cmd = (ld::incremental::IncrementalCommand<P> *)p;
 	cmd->set_cmd(LC_INCREMENTAL);
-	cmd->set_cmdsize(sizeof(macho_linkedit_data_command<P>));
-	cmd->set_dataoff(_writer.incrementalSection->fileOffset);
-	cmd->set_datasize(_writer.incrementalSection->size);
-#undef LC_INCREMENTAL
-	return p + sizeof(macho_linkedit_data_command<P>);
+	cmd->set_cmdsize(sizeof(ld::incremental::IncrementalCommand<P>));
+	cmd->set_file_off(_writer.incrementalSection->fileOffset);
+	cmd->set_file_size(_writer.incrementalSection->size + _writer.incrementalSymTabSection->size + _writer.incrementalStringSection->size);
+	cmd->set_inputs_off(_writer.incrementalSection->fileOffset);
+	cmd->set_inputs_size(_writer.incrementalSection->size);
+	cmd->set_symtab_off(_writer.incrementalSymTabSection->fileOffset);
+	cmd->set_symtab_size(_writer.incrementalSymTabSection->size);
+	cmd->set_strtab_off(_writer.incrementalStringSection->fileOffset);
+	cmd->set_strtab_size(_writer.incrementalStringSection->size);
+	return p + sizeof(ld::incremental::IncrementalCommand<P>);
 }
 
 template <typename A>

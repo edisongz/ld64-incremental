@@ -41,6 +41,7 @@
 #include "Architectures.hpp"
 #include "MachOFileAbstraction.hpp"
 #include "libcodedirectory.h"
+#include "incremental.hpp"
 
 #ifndef CS_LINKER_SIGNED
 	#define CS_LINKER_SIGNED            0x00020000  /* Automatically signed by the linker */
@@ -2300,33 +2301,110 @@ void CodeSignatureAtom::hash(uint8_t* wholeFileBuffer) const
 		throw "error code signing";
 }
 
-class IncrementalAtom : public LinkEditAtom
+class IncrementalInputsAtom : public LinkEditAtom
 {
 public:
-												IncrementalAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+												IncrementalInputsAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
 													: LinkEditAtom(opts, state, writer, _s_section, 16), _opts(opts) {
-														assert(opts.outputKind() != Options::kObjectFile);
-														this->_encoded = true;  // only works because this is last
+														this->_encoded = true;
 													}
 
 	// overrides of ld::Atom
-	virtual const char*							name() const		{ return "incremental"; }
+	virtual const char*							name() const		{ return "incremental inputs"; }
 	// overrides of LinkEditAtom
 	virtual void								encode() const;
 
 private:
 	const Options& 				_opts;
-
+	
 	static ld::Section			_s_section;
-
 };
 
-ld::Section IncrementalAtom::_s_section("__LINKEDIT", "__incremental", ld::Section::typeLinkEdit, true);
+ld::Section IncrementalInputsAtom::_s_section("__LINKEDIT", "__incr_inputs", ld::Section::typeLinkEdit, true);
 
-void IncrementalAtom::encode() const
-{
-	this->_encodedData.alloc(8);
+void IncrementalInputsAtom::encode() const {
+	this->_encodedData.bytes().reserve(sizeof(ld::incremental::incremental_input_entry) * _opts.getInputFiles().size());
+	uint32_t index = 0;
+	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
+		ld::incremental::incremental_input_entry entry;
+		entry.fileIndexInStringTable_ = index++;
+		entry.modTime_ = it->modTime;
+		entry.type_ = ld::File::Other;
+		this->_encodedData.append_mem(&entry, sizeof(ld::incremental::incremental_input_entry));
+	}
 	this->_encodedData.pad_to_size(8);
+	this->_encoded = true;
+}
+
+template <typename A>
+class IncrementalSymTabAtom : public LinkEditAtom {
+public:
+	IncrementalSymTabAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+														: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)), _opts(opts) {
+															this->_encoded = true;
+													   }
+
+	virtual const char*							name() const		{ return "incremental global symbol table"; }
+	virtual void								encode() const;
+
+private:
+	typedef typename A::P						P;
+	typedef typename A::P::E					E;
+	typedef typename A::P::uint_t				pint_t;
+	const Options& 				_opts;
+	
+	static ld::Section			_s_section;
+};
+
+template <typename A>
+ld::Section IncrementalSymTabAtom<A>::_s_section("__LINKEDIT", "__incr_symtab", ld::Section::typeLinkEdit, true);
+
+template <typename A>
+void IncrementalSymTabAtom<A>::encode() const {
+	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
+		ld::Internal::FinalSection *sect = *sit;
+		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
+			if ((*ait)->scope() != ld::Atom::scopeGlobal) {
+				continue;
+			}
+		}
+	}
+	this->_encodedData.pad_to_size(sizeof(pint_t));
+	this->_encoded = true;
+}
+
+template<typename A>
+class IncrementalStringPoolAtom : public LinkEditAtom
+{
+public:
+													IncrementalStringPoolAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+														: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)), _opts(opts) {
+															this->_encoded = true;
+													   }
+
+	virtual const char*							name() const		{ return "incremental string pool"; }
+	virtual void								encode() const;
+
+private:
+	enum { kBufferSize = 0x01000000 };
+	typedef typename A::P						P;
+	typedef typename A::P::E					E;
+	typedef typename A::P::uint_t				pint_t;
+	const Options& 				_opts;
+	
+	static ld::Section			_s_section;
+};
+
+template <typename A>
+ld::Section IncrementalStringPoolAtom<A>::_s_section("__LINKEDIT", "__incr_strtab", ld::Section::typeLinkEdit, true);
+
+template <typename A>
+void IncrementalStringPoolAtom<A>::encode() const {
+	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
+		this->_encodedData.append_mem(it->path, strlen(it->path));
+		this->_encodedData.append_mem("\0", 1);
+	}
+	this->_encodedData.pad_to_size(sizeof(pint_t));
 	this->_encoded = true;
 }
 

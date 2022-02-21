@@ -97,6 +97,8 @@ public:
 	ld::Internal::FinalSection*	chainInfoSection;
 	ld::Internal::FinalSection*	codeSignatureSection;
 	ld::Internal::FinalSection*	incrementalSection;
+	ld::Internal::FinalSection*	incrementalSymTabSection;
+	ld::Internal::FinalSection*	incrementalStringSection;
 
 	struct RebaseInfo {
 						RebaseInfo(uint8_t t, uint64_t addr) : _type(t), _address(addr) {}
@@ -427,6 +429,8 @@ public:
 	class LinkEditAtom*						_optimizationHintsAtom;
 	class LinkEditAtom*						_chainedInfoAtom;
 	class LinkEditAtom*						_incrementalAtom;
+	class LinkEditAtom*						_incrementalSymTabAtom;
+	class LinkEditAtom*						_incrementalStringTableAtom;
 	class CodeSignatureAtom*				_codeSignatureAtom;
 
 };
