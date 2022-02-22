@@ -1651,8 +1651,7 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyIncrementalLoadCommand(uint8_t *p) co
 	ld::incremental::IncrementalCommand<P> *cmd = (ld::incremental::IncrementalCommand<P> *)p;
 	cmd->set_cmd(LC_INCREMENTAL);
 	cmd->set_cmdsize(sizeof(ld::incremental::IncrementalCommand<P>));
-	cmd->set_file_off(_writer.incrementalSection->fileOffset);
-	cmd->set_file_size(_writer.incrementalSection->size + _writer.incrementalSymTabSection->size + _writer.incrementalStringSection->size);
+	cmd->set_file_count(static_cast<uint32_t>(_options.getInputFiles().size()));
 	cmd->set_inputs_off(_writer.incrementalSection->fileOffset);
 	cmd->set_inputs_size(_writer.incrementalSection->size);
 	cmd->set_symtab_off(_writer.incrementalSymTabSection->fileOffset);

@@ -2323,14 +2323,50 @@ private:
 ld::Section IncrementalInputsAtom::_s_section("__LINKEDIT", "__incr_inputs", ld::Section::typeLinkEdit, true);
 
 void IncrementalInputsAtom::encode() const {
-	this->_encodedData.bytes().reserve(sizeof(ld::incremental::incremental_input_entry) * _opts.getInputFiles().size());
+	// atom map
+	std::unordered_map<std::string, const ld::File *> fileMap;
+	std::unordered_map<std::string, std::vector<const ld::Atom *>> atomMap;
+	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); ++sit) {
+		ld::Internal::FinalSection *sect = *sit;
+		for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+			const ld::Atom *atom = *ait;
+			if (!atom->file() || atom->size() == 0) {
+				continue;
+			}
+//			uint64_t fileOffset = atom->finalAddress() - sect->address + sect->fileOffset;
+			fileMap[atom->file()->path()] = atom->file();
+			
+			auto atomsIt = atomMap.find(atom->file()->path());
+			if (atomsIt != atomMap.end()) {
+				atomsIt->second.push_back(atom);
+			} else {
+				std::vector<const ld::Atom *> v{atom};
+				atomMap[atom->file()->path()] = v;
+			}
+		}
+	}
+	
+	// file list
 	uint32_t index = 0;
 	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
-		ld::incremental::incremental_input_entry entry;
+		ld::incremental::InputEntry entry;
 		entry.fileIndexInStringTable_ = index++;
 		entry.modTime_ = it->modTime;
-		entry.type_ = ld::File::Other;
-		this->_encodedData.append_mem(&entry, sizeof(ld::incremental::incremental_input_entry));
+		const ld::File *file = fileMap[it->path];
+		entry.type_ = file->type();
+		switch (entry.type_) {
+			case ld::File::Reloc: {
+				entry.u.relocEntry.atomCount_ = atomMap[it->path].size();
+			}
+				break;
+			case ld::File::Archive:
+				break;
+			case ld::File::Dylib:
+				break;
+			default:
+				break;
+		}
+		this->_encodedData.append_mem(&entry, sizeof(ld::incremental::InputEntry));
 	}
 	this->_encodedData.pad_to_size(8);
 	this->_encoded = true;
@@ -2351,6 +2387,8 @@ private:
 	typedef typename A::P						P;
 	typedef typename A::P::E					E;
 	typedef typename A::P::uint_t				pint_t;
+	const ld::Atom *targetAtomOfFixup(const ld::Fixup *fixup) const;
+	
 	const Options& 				_opts;
 	
 	static ld::Section			_s_section;
@@ -2360,15 +2398,91 @@ template <typename A>
 ld::Section IncrementalSymTabAtom<A>::_s_section("__LINKEDIT", "__incr_symtab", ld::Section::typeLinkEdit, true);
 
 template <typename A>
+const ld::Atom *IncrementalSymTabAtom<A>::targetAtomOfFixup(const ld::Fixup *fixup) const {
+	// FIXME: Is this right for makeThreadedStartsSection?
+	if ( !_opts.makeCompressedDyldInfo() && !_opts.makeThreadedStartsSection() && !_opts.makeChainedFixups() ) {
+		// For external relocations the classic mach-o format
+		// has addend only stored in the content.  That means
+		// that the address of the target is not used.
+		if (fixup->contentAddendOnly) {
+			return nullptr;
+		}
+	}
+	const ld::Atom *target = nullptr;
+	switch ( fixup->binding ) {
+		case ld::Fixup::bindingNone: // fall through
+		case ld::Fixup::bindingByNameUnbound:
+			return nullptr;
+		case ld::Fixup::bindingByContentBound:
+		case ld::Fixup::bindingDirectlyBound:
+			target = fixup->u.target;
+			if ( !target->finalAddressMode() && (target->contentType() == ld::Atom::typeLTOtemporary) )
+				throwf("reference to bitcode symbol '%s' which LTO has not compiled", target->name());
+			return target;
+		case ld::Fixup::bindingsIndirectlyBound:
+			target = _state.indirectBindingTable[fixup->u.bindingIndex];
+			if (!target->finalAddressMode()) {
+				if (target->contentType() == ld::Atom::typeLTOtemporary) {
+					throwf("reference to bitcode symbol '%s' which LTO has not compiled", target->name());
+				}
+				throwf("reference to symbol (which has not been assigned an address) %s", target->name());
+			}
+			return target;
+	}
+	throw "unexpected binding";
+}
+
+template <typename A>
 void IncrementalSymTabAtom<A>::encode() const {
+	// input files
+	uint32_t index = 0;
+	std::unordered_map<std::string, uint32_t> fileIndexMap;
+	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
+		fileIndexMap[it->path] = index++;
+	}
+	
+	std::unordered_map<const char *, uint32_t> stringTable;
+	std::unordered_map<const char *, std::set<uint32_t>> symbolTable;
 	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
 		ld::Internal::FinalSection *sect = *sit;
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
-			if ((*ait)->scope() != ld::Atom::scopeGlobal) {
+			const ld::Atom *atom = *ait;
+			if (stringTable.find(atom->name()) == stringTable.end()) {
+				stringTable[atom->name()] = index++;
+			}
+			if (!atom->file() || atom->size() == 0) {
 				continue;
+			}
+			for (auto fit = atom->fixupsBegin(); fit != atom->fixupsEnd(); fit++) {
+				const ld::Atom *toTarget = targetAtomOfFixup(fit);
+				if (toTarget && toTarget->scope() != ld::Atom::scopeTranslationUnit && toTarget->file() && atom->file() != toTarget->file()) {
+					auto referenceFileIt = symbolTable.find(toTarget->name());
+					if (referenceFileIt != symbolTable.end()) {
+						referenceFileIt->second.insert(fileIndexMap[atom->file()->path()]);
+					} else {
+						std::set<uint32_t> fileSet;
+						fileSet.insert(fileIndexMap[atom->file()->path()]);
+						symbolTable[toTarget->name()] = fileSet;
+					}
+				}
 			}
 		}
 	}
+	
+	for (auto it = symbolTable.begin(); it != symbolTable.end(); it++) {
+//		ld::incremental::GlobalSymbolTableEntry<P> entry;
+//		entry.setSymbolIndexInStringTable_(stringTable[it->first]);
+//		entry.setReferencedFileCount_(static_cast<uint32_t>(it->second.size()));
+//		entry.setReferencedFileIndex_(it->second);
+//		this->_encodedData.append_mem(&entry, (entry.referencedFileCount_() + 2) * sizeof(uint32_t));
+		
+		ld::incremental::GlobalSymbolRefEntry *entry = (ld::incremental::GlobalSymbolRefEntry *)malloc((it->second.size() + 2) * sizeof(uint32_t));
+		entry->symbolIndexInStringTable_ = stringTable[it->first];
+		entry->referencedFileCount_ = static_cast<uint32_t>(it->second.size());
+		std::copy(it->second.begin(), it->second.end(), entry->referencedFileIndex_);
+		this->_encodedData.append_mem(entry, (entry->referencedFileCount_ + 2) * sizeof(uint32_t));
+	}
+	
 	this->_encodedData.pad_to_size(sizeof(pint_t));
 	this->_encoded = true;
 }
@@ -2404,6 +2518,20 @@ void IncrementalStringPoolAtom<A>::encode() const {
 		this->_encodedData.append_mem(it->path, strlen(it->path));
 		this->_encodedData.append_mem("\0", 1);
 	}
+	
+	std::unordered_map<const char *, bool> stringTable;
+	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
+		ld::Internal::FinalSection *sect = *sit;
+		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
+			const ld::Atom *atom = *ait;
+			if (stringTable.find(atom->name()) == stringTable.end()) {
+				stringTable[atom->name()] = true;
+				this->_encodedData.append_mem(atom->name(), strlen(atom->name()));
+				this->_encodedData.append_mem("\0", 1);
+			}
+		}
+	}
+	
 	this->_encodedData.pad_to_size(sizeof(pint_t));
 	this->_encoded = true;
 }

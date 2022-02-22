@@ -50,17 +50,33 @@ namespace ld {
 namespace incremental {
 
 #pragma pack (1)
-struct incremental_input_entry {
-    uint32_t    fileIndexInStringTable_;            // file index in string table
+struct InputEntry {
+    uint32_t    fileIndexInStringTable_;            // file index in incremental string table
     uint64_t    modTime_;                           // last link input file modification time
     uint32_t    type_;
+    
+    struct RelocEntry {
+        uint32_t    atomCount_;
+        uint32_t    atomNameIndex_;
+        uint64_t    atomFileOffset_;
+        uint64_t    atomSize_;                  
+    };
+    
+    union {
+        RelocEntry relocEntry;
+    } u;
+};
+
+struct GlobalSymbolRefEntry {
+    uint32_t symbolIndexInStringTable_;
+    uint32_t referencedFileCount_;
+    uint32_t referencedFileIndex_[0];
 };
 
 struct macho_incremental_command {
     uint32_t  cmd;        // LC_INCREMENT
     uint32_t  cmdsize;    // sizeof(struct incremental_command)
-    uint64_t  file_off;    // file offset of data in __LINKEDIT segment
-    uint64_t  file_size;   // file size of data in __LINKEDIT segment
+    uint32_t  file_count;    // file offset of data in __LINKEDIT segment
     uint32_t  inputs_off;   // file size of data in __LINKEDIT segment
     uint32_t  inputs_size;   // file size of data in __LINKEDIT segment
     uint32_t  symtab_off;   // file size of data in __LINKEDIT segment
@@ -86,9 +102,41 @@ public:
     typedef typename P::E        E;
     
 private:
-    incremental_input_entry    entry;
+    InputEntry    entry;
 };
 
+// Incremental input entry command
+template <typename P>
+class GlobalSymbolTableEntry {
+public:
+    GlobalSymbolTableEntry(uint32_t symbolIndex, uint32_t fileCount) {
+        this->setSymbolIndexInStringTable_(symbolIndex);
+        this->setReferencedFileCount_(fileCount);
+    }
+    
+    uint32_t        symbolIndexInStringTable_() const             INLINE { return E::get32(entry.symbolIndexInStringTable_); }
+    void            setSymbolIndexInStringTable_(uint32_t value)    INLINE { E::set32(entry.symbolIndexInStringTable_, value); }
+    
+    uint32_t        referencedFileCount_() const             INLINE { return E::get32(entry.referencedFileCount_); }
+    void            setReferencedFileCount_(uint32_t value)    INLINE { E::set32(entry.referencedFileCount_, value); }
+        
+    const uint32_t*    referencedFileIndex_() const                             {
+        return entry.referencedFileIndex_;
+    }
+    
+    void            setReferencedFileIndex_(const std::set<uint32_t> &buffer)         {
+        for (auto it = buffer.begin(); it != buffer.end(); it++) {
+            E::set32(entry.referencedFileIndex_, *it);
+        }
+    }
+    
+    typedef typename P::E        E;
+    
+private:
+    GlobalSymbolRefEntry    entry;
+};
+
+// Incremental LoadCommand
 template <typename P>
 class IncrementalCommand {
 public:
@@ -98,11 +146,8 @@ public:
     uint32_t    cmdsize() const        INLINE { return E::get32(fields.cmdsize); }
     void      set_cmdsize(uint32_t value)  INLINE { E::set32(fields.cmdsize, value); }
 
-    uint64_t    file_off() const        INLINE { return E::get64(fields.file_off); }
-    void      set_file_off(uint64_t value)  INLINE { E::set64(fields.file_off, value);  }
-  
-    uint64_t    file_size() const      INLINE { return E::get64(fields.file_size); }
-    void      set_file_size(uint64_t value)INLINE { E::set64(fields.file_size, value);  }
+    uint32_t    file_count() const        INLINE { return E::get32(fields.file_count); }
+    void      set_file_count(uint32_t value)  INLINE { E::set32(fields.file_count, value);  }
     
     uint32_t    inputs_off() const        INLINE { return E::get32(fields.inputs_off); }
     void      set_inputs_off(uint32_t value)  INLINE { E::set32(fields.inputs_off, value);  }
