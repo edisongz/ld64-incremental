@@ -67,6 +67,7 @@ extern "C" double log2 ( double );
 #include "Resolver.h"
 #include "OutputFile.h"
 #include "Snapshot.h"
+#include "incremental.hpp"
 
 #include "passes/stubs/make_stubs.h"
 #include "passes/dtrace_dof.h"
@@ -126,6 +127,7 @@ private:
 	bool									inMoveRWChain(const ld::Atom& atom, const char* filePath, bool followedBackBranch, const char*& dstSeg, bool& wildCardMatch);
 	bool									inMoveROChain(const ld::Atom& atom, const char* filePath, const char*& dstSeg, bool& wildCardMatch);
 	bool									inMoveAuthChain(const ld::Atom& atom, bool followedBackBranch, const char*& dstSeg);
+	uint64_t								incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset);
 
 	class FinalSection : public ld::Internal::FinalSection 
 	{
@@ -1153,6 +1155,9 @@ void InternalState::setSectionSizesAndAlignments()
 							throwf("weak external symbol: %s", atom->name());
 				}
 			}
+			
+			offset += incrementalPatchSpace(*sect, offset);
+			
 			sect->size = offset;
 			// section alignment is that of a contained atom with the greatest alignment
 			sect->alignment = maxAlignment;
@@ -1183,6 +1188,20 @@ void InternalState::setSectionSizesAndAlignments()
 		}
 	}
 
+}
+
+uint64_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset) {
+	if (_options.enableIncrementalLink()) {
+		if (sect.type() == ld::Section::typeZeroFill) {
+			return 0;
+		}
+		if (strncmp(sect.sectionName(), "__text", 6) == 0 || strncmp(sect.sectionName(), "__data", 6) == 0) {
+			uint64_t incrementalPatchSpace = (static_cast<uint64_t>(offset * 0.1) + 7) & (-8);
+			fprintf(stderr, "incremental segment:%s, section:%s, incremental padding space:%llu\n", sect.segmentName(), sect.sectionName(), incrementalPatchSpace);
+			return incrementalPatchSpace;
+		}
+	}
+	return 0;
 }
 
 uint64_t InternalState::assignFileOffsets() 
@@ -1491,6 +1510,11 @@ int main(int argc, const char* argv[])
 		// create object to track command line arguments
 		Options options(argc, argv);
 		InternalState state(options);
+		
+		if (options.enableIncrementalLink()) {
+			ld::incremental::Incremental incrementalContext(options);
+			incrementalContext.openIncrementalBinary();
+		}
 		
 		// allow libLTO to be overridden by command line -lto_library
 		if (const char *dylib = options.overridePathlibLTO())

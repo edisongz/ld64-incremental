@@ -2333,7 +2333,6 @@ void IncrementalInputsAtom::encode() const {
 			if (!atom->file() || atom->size() == 0) {
 				continue;
 			}
-//			uint64_t fileOffset = atom->finalAddress() - sect->address + sect->fileOffset;
 			fileMap[atom->file()->path()] = atom->file();
 			
 			auto atomsIt = atomMap.find(atom->file()->path());
@@ -2349,24 +2348,59 @@ void IncrementalInputsAtom::encode() const {
 	// file list
 	uint32_t index = 0;
 	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
-		ld::incremental::InputEntry entry;
-		entry.fileIndexInStringTable_ = index++;
-		entry.modTime_ = it->modTime;
 		const ld::File *file = fileMap[it->path];
-		entry.type_ = file->type();
-		switch (entry.type_) {
+		if (!file) {
+			ld::incremental::InputEntry entry;
+			entry.fileIndexInStringTable_ = index++;
+			entry.modTime_ = it->modTime;
+			entry.type_ = ld::File::Other;
+			this->_encodedData.append_mem(&entry, sizeof(ld::incremental::InputEntry));
+			continue;
+		}
+		size_t entrySize = 0;
+		switch (file->type()) {
 			case ld::File::Reloc: {
-				entry.u.relocEntry.atomCount_ = atomMap[it->path].size();
+				std::vector<const ld::Atom *> atoms = atomMap[it->path];
+				uint32_t atomCount = static_cast<uint32_t>(atoms.size());
+				entrySize = 5 * sizeof(uint32_t) + sizeof(ld::incremental::InputEntry::AtomEntry) * atomCount;
+				ld::incremental::InputEntry *entry = (ld::incremental::InputEntry *)malloc(entrySize);
+				entry->fileIndexInStringTable_ = index++;
+				entry->modTime_ = it->modTime;
+				entry->type_ = file->type();
+				entry->u.relocObj->atomCount_ = atomCount;
+				ld::incremental::InputEntry::AtomEntry *atomPtr = entry->u.relocObj->atoms;
+				for (auto ait = atoms.begin(); ait != atoms.end(); ait++) {
+					const ld::Internal::FinalSection& sect = static_cast<const ld::Internal::FinalSection&>((*ait)->section());
+					ld::incremental::InputEntry::AtomEntry atomEntry;
+					atomEntry.atomNameIndex_ = 0;
+					atomEntry.atomFileOffset_ = (*ait)->finalAddress() - sect.address + sect.fileOffset;
+					atomEntry.atomSize_ = (*ait)->size();
+					memcpy(atomPtr++, &atomEntry, sizeof(ld::incremental::InputEntry::AtomEntry));
+				}
+				this->_encodedData.append_mem(entry, entrySize);
+				free(entry);
+				entry = nullptr;
 			}
 				break;
-			case ld::File::Archive:
+			case ld::File::Archive: {
+				ld::incremental::InputEntry entry;
+				entry.fileIndexInStringTable_ = index++;
+				entry.modTime_ = it->modTime;
+				entry.type_ = file->type();
+				this->_encodedData.append_mem(&entry, sizeof(ld::incremental::InputEntry));
+			}
 				break;
-			case ld::File::Dylib:
+			case ld::File::Dylib: {
+				ld::incremental::InputEntry entry;
+				entry.fileIndexInStringTable_ = index++;
+				entry.modTime_ = it->modTime;
+				entry.type_ = file->type();
+				this->_encodedData.append_mem(&entry, sizeof(ld::incremental::InputEntry));
+			}
 				break;
 			default:
 				break;
 		}
-		this->_encodedData.append_mem(&entry, sizeof(ld::incremental::InputEntry));
 	}
 	this->_encodedData.pad_to_size(8);
 	this->_encoded = true;
@@ -2481,6 +2515,8 @@ void IncrementalSymTabAtom<A>::encode() const {
 		entry->referencedFileCount_ = static_cast<uint32_t>(it->second.size());
 		std::copy(it->second.begin(), it->second.end(), entry->referencedFileIndex_);
 		this->_encodedData.append_mem(entry, (entry->referencedFileCount_ + 2) * sizeof(uint32_t));
+		free(entry);
+		entry = nullptr;
 	}
 	
 	this->_encodedData.pad_to_size(sizeof(pint_t));
