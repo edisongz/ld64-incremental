@@ -4434,7 +4434,7 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<x86>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
@@ -4515,7 +4515,7 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<x86_64>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86_64>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
@@ -4596,7 +4596,7 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<arm>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
@@ -4677,7 +4677,7 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<arm64>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
@@ -4758,7 +4758,7 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<arm64_32>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64_32>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);

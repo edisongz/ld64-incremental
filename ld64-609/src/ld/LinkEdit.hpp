@@ -2301,6 +2301,7 @@ void CodeSignatureAtom::hash(uint8_t* wholeFileBuffer) const
 		throw "error code signing";
 }
 
+template <typename A>
 class IncrementalInputsAtom : public LinkEditAtom
 {
 public:
@@ -2315,14 +2316,19 @@ public:
 	virtual void								encode() const;
 
 private:
+	typedef typename A::P						P;
+	typedef typename A::P::E					E;
+	typedef typename A::P::uint_t				pint_t;
 	const Options& 				_opts;
 	
 	static ld::Section			_s_section;
 };
 
-ld::Section IncrementalInputsAtom::_s_section("__LINKEDIT", "__incr_inputs", ld::Section::typeLinkEdit, true);
+template <typename A>
+ld::Section IncrementalInputsAtom<A>::_s_section("__LINKEDIT", "__incr_inputs", ld::Section::typeLinkEdit, true);
 
-void IncrementalInputsAtom::encode() const {
+template <typename A>
+void IncrementalInputsAtom<A>::encode() const {
 	// atom map
 	std::unordered_map<std::string, const ld::File *> fileMap;
 	std::unordered_map<std::string, std::vector<const ld::Atom *>> atomMap;
@@ -2362,20 +2368,30 @@ void IncrementalInputsAtom::encode() const {
 			case ld::File::Reloc: {
 				std::vector<const ld::Atom *> atoms = atomMap[it->path];
 				uint32_t atomCount = static_cast<uint32_t>(atoms.size());
-				entrySize = 5 * sizeof(uint32_t) + sizeof(ld::incremental::InputEntry::AtomEntry) * atomCount;
-				ld::incremental::InputEntry *entry = (ld::incremental::InputEntry *)malloc(entrySize);
-				entry->fileIndexInStringTable_ = index++;
-				entry->modTime_ = it->modTime;
-				entry->type_ = file->type();
-				entry->u.relocObj->atomCount_ = atomCount;
-				ld::incremental::InputEntry::AtomEntry *atomPtr = entry->u.relocObj->atoms;
+				entrySize = 5 * sizeof(uint32_t) + sizeof(ld::incremental::AtomEntry<P>) * atomCount;
+				ld::incremental::InputEntrySection<P> *entry = (ld::incremental::InputEntrySection<P> *)malloc(entrySize);
+				entry->setFileIndexInStringTable(index++);
+				entry->setModTime(it->modTime);
+				entry->setType(file->type());
+				entry->setAtomCount(atomCount);
+				ld::incremental::IncrAtomEntry *atomPtr = entry->entryRef().u.relocObj->atoms;
+//				ld::incremental::IncrAtomEntry *atomPtr = entry->entryRef().u;
 				for (auto ait = atoms.begin(); ait != atoms.end(); ait++) {
 					const ld::Internal::FinalSection& sect = static_cast<const ld::Internal::FinalSection&>((*ait)->section());
-					ld::incremental::InputEntry::AtomEntry atomEntry;
-					atomEntry.atomNameIndex_ = 0;
-					atomEntry.atomFileOffset_ = (*ait)->finalAddress() - sect.address + sect.fileOffset;
-					atomEntry.atomSize_ = (*ait)->size();
-					memcpy(atomPtr++, &atomEntry, sizeof(ld::incremental::InputEntry::AtomEntry));
+					ld::incremental::AtomEntry<P> atomEntry;
+					atomEntry.setAtomNameIndex_(0);
+					atomEntry.setAtomFileOffset((*ait)->finalAddress() - sect.address + sect.fileOffset);
+					atomEntry.setAtomSize((*ait)->size());
+					
+//					uint32_t fixupsCount = 0;
+//					relocation_info *relocPtr = atomEntry.fixups_;
+//					for (auto fit = (*ait)->fixupsBegin(); fit != (*ait)->fixupsEnd(); fit++) {
+//						++fixupsCount;
+//
+////						memcpy(relocPtr++, <#const void *__src#>, <#size_t __n#>)
+//					}
+//					atomEntry.fixupCount_ = fixupsCount;
+					memcpy(atomPtr++, &atomEntry, sizeof(ld::incremental::AtomEntry<P>));
 				}
 				this->_encodedData.append_mem(entry, entrySize);
 				free(entry);
@@ -2504,17 +2520,11 @@ void IncrementalSymTabAtom<A>::encode() const {
 	}
 	
 	for (auto it = symbolTable.begin(); it != symbolTable.end(); it++) {
-//		ld::incremental::GlobalSymbolTableEntry<P> entry;
-//		entry.setSymbolIndexInStringTable_(stringTable[it->first]);
-//		entry.setReferencedFileCount_(static_cast<uint32_t>(it->second.size()));
-//		entry.setReferencedFileIndex_(it->second);
-//		this->_encodedData.append_mem(&entry, (entry.referencedFileCount_() + 2) * sizeof(uint32_t));
-		
-		ld::incremental::GlobalSymbolRefEntry *entry = (ld::incremental::GlobalSymbolRefEntry *)malloc((it->second.size() + 2) * sizeof(uint32_t));
-		entry->symbolIndexInStringTable_ = stringTable[it->first];
-		entry->referencedFileCount_ = static_cast<uint32_t>(it->second.size());
-		std::copy(it->second.begin(), it->second.end(), entry->referencedFileIndex_);
-		this->_encodedData.append_mem(entry, (entry->referencedFileCount_ + 2) * sizeof(uint32_t));
+		ld::incremental::GlobalSymbolTableEntry<P> *entry = (ld::incremental::GlobalSymbolTableEntry<P> *)malloc((it->second.size() + 2) * sizeof(uint32_t));
+		entry->setSymbolIndexInStringTable_(stringTable[it->first]);
+		entry->setReferencedFileCount_(static_cast<uint32_t>(it->second.size()));
+		entry->setReferencedFileIndex_(it->second);
+		this->_encodedData.append_mem(entry, (entry->referencedFileCount_() + 2) * sizeof(uint32_t));
 		free(entry);
 		entry = nullptr;
 	}

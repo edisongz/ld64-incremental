@@ -528,7 +528,7 @@ uint64_t HeaderAndLoadCommandsAtom<A>::size() const
 		sz += sizeof(macho_linkedit_data_command<P>);
 
 	if (_hasIncrementalLink) {
-		sz += sizeof(ld::incremental::IncrementalCommand<P>);
+		sz += alignedSize(sizeof(ld::incremental::IncrementalCommand<P>));
 	}
 	return sz;
 }
@@ -1650,7 +1650,7 @@ template <typename A>
 uint8_t* HeaderAndLoadCommandsAtom<A>::copyIncrementalLoadCommand(uint8_t *p) const {
 	ld::incremental::IncrementalCommand<P> *cmd = (ld::incremental::IncrementalCommand<P> *)p;
 	cmd->set_cmd(LC_INCREMENTAL);
-	cmd->set_cmdsize(sizeof(ld::incremental::IncrementalCommand<P>));
+	cmd->set_cmdsize(alignedSize(sizeof(ld::incremental::IncrementalCommand<P>)));
 	cmd->set_file_count(static_cast<uint32_t>(_options.getInputFiles().size()));
 	cmd->set_inputs_off(_writer.incrementalSection->fileOffset);
 	cmd->set_inputs_size(_writer.incrementalSection->size);
@@ -1658,7 +1658,7 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyIncrementalLoadCommand(uint8_t *p) co
 	cmd->set_symtab_size(_writer.incrementalSymTabSection->size);
 	cmd->set_strtab_off(_writer.incrementalStringSection->fileOffset);
 	cmd->set_strtab_size(_writer.incrementalStringSection->size);
-	return p + sizeof(ld::incremental::IncrementalCommand<P>);
+	return p + cmd->cmdsize();
 }
 
 template <typename A>

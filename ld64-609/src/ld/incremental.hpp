@@ -48,48 +48,82 @@
 namespace ld {
 namespace incremental {
 
+#pragma pack (1)
+struct IncrAtomEntry {
+    uint32_t atomNameIndex_;
+    uint64_t atomFileOffset_;
+    uint64_t atomSize_;
+//        uint32_t fixupCount_;
+//        relocation_info fixups_[0];
+};
+
 struct InputEntry {
     uint32_t fileIndexInStringTable_; // file index in incremental string table
     uint64_t modTime_;                // last link input file modification time
     uint32_t type_;
 
-    struct AtomEntry {
-        uint32_t atomNameIndex_;
-        uint64_t atomFileOffset_;
-        uint64_t atomSize_;
-    };
-
     struct RelocObj {
         uint32_t atomCount_;
-        AtomEntry atoms[0];
+        IncrAtomEntry atoms[0];
     };
 
     union {
         RelocObj relocObj[0];
     } u;
-} __attribute__((packed));
+};
 
 struct GlobalSymbolRefEntry {
     uint32_t symbolIndexInStringTable_;
     uint32_t referencedFileCount_;
     uint32_t referencedFileIndex_[0];
-} __attribute__((packed));
+};
 
 struct macho_incremental_command {
     uint32_t cmd;         // LC_INCREMENT
     uint32_t cmdsize;     // sizeof(struct incremental_command)
-    uint32_t file_count;  // file offset of data in __LINKEDIT segment
-    uint32_t inputs_off;  // file size of data in __LINKEDIT segment
-    uint32_t inputs_size; // file size of data in __LINKEDIT segment
-    uint32_t symtab_off;  // file size of data in __LINKEDIT segment
-    uint32_t symtab_size; // file size of data in __LINKEDIT segment
-    uint32_t strtab_off;  // file size of data in __LINKEDIT segment
-    uint32_t strtab_size; // file size of data in __LINKEDIT segment
-} __attribute__((packed));
+    uint32_t file_count;  // file offset of data in __INCREMENTAL segment
+    uint32_t inputs_off;  // file size of data in __INCREMENTAL segment
+    uint32_t inputs_size; // file size of data in __INCREMENTAL segment
+    uint32_t symtab_off;  // file size of data in __INCREMENTAL segment
+    uint32_t symtab_size; // file size of data in __INCREMENTAL segment
+    uint32_t strtab_off;  // file size of data in __INCREMENTAL segment
+    uint32_t strtab_size; // file size of data in __INCREMENTAL segment
+};
+#pragma pack()
+
+template <typename P>
+class AtomEntry {
+public:
+    uint32_t atomNameIndex() const INLINE {
+        return E::get32(entry.atomNameIndex_);
+    }
+    void setAtomNameIndex_(uint32_t value) INLINE {
+        E::set32(entry.atomNameIndex_, value);
+    }
+
+    uint64_t atomFileOffset() const INLINE {
+        return E::get64(entry.atomFileOffset_);
+    }
+    void setAtomFileOffset(uint64_t value) INLINE {
+        E::set64(entry.atomFileOffset_, value);
+    }
+    
+    uint64_t atomSize() const INLINE {
+        return E::get64(entry.atomSize_);
+    }
+    void setAtomSize(uint64_t value) INLINE {
+        E::set64(entry.atomSize_, value);
+    }
+
+    typedef typename P::E E;
+
+private:
+    IncrAtomEntry entry;
+};
 
 // Incremental input entry command
 template <typename P>
-class InputEntryCommand {
+class InputEntrySection {
 public:
     uint32_t fileIndexInStringTable() const INLINE {
         return E::get32(entry.fileIndexInStringTable_);
@@ -110,6 +144,31 @@ public:
     }
     void setType(uint32_t value) INLINE {
         E::set32(entry.type_, value);
+    }
+    
+    uint32_t atomCount() const INLINE {
+        return E::get32(entry.u.relocObj->atomCount_);
+    }
+    void setAtomCount(uint32_t value) INLINE {
+        E::set32(entry.u.relocObj->atomCount_, value);
+    }
+    
+    std::vector<AtomEntry<P>> atoms() const {
+        std::vector<AtomEntry<P>> v;
+        IncrAtomEntry *p = (IncrAtomEntry *)entry.u.relocObj->atoms;
+        for (uint32_t i = 0; i < atomCount(); i++) {
+            AtomEntry<P> atom;
+            atom.setAtomNameIndex_(p->atomNameIndex_);
+            atom.setAtomFileOffset(p->atomFileOffset_);
+            atom.setAtomSize(p->atomSize_);
+            v.push_back(atom);
+            p++;
+        }
+        return v;
+    }
+    
+    InputEntry &entryRef() {
+        return entry;
     }
     
     typedef typename P::E E;
@@ -141,13 +200,19 @@ public:
         E::set32(entry.referencedFileCount_, value);
     }
 
-    const uint32_t *referencedFileIndex_() const INLINE {
-        return entry.referencedFileIndex_;
+    const std::set<uint32_t> referencedFileIndex_() const INLINE {
+        std::set<uint32_t> v;
+        uint32_t *p = (uint32_t *)entry.referencedFileIndex_;
+        for (uint32_t i = 0; i < referencedFileCount_(); i++) {
+            v.insert(E::get32(*p++));
+        }
+        return v;
     }
 
     void setReferencedFileIndex_(const std::set<uint32_t> &buffer) {
+        uint32_t *p = (uint32_t *)entry.referencedFileIndex_;
         for (auto it = buffer.begin(); it != buffer.end(); it++) {
-            E::set32(entry.referencedFileIndex_, *it);
+            E::set32(*p++, *it);
         }
     }
 
@@ -159,8 +224,7 @@ private:
 
 // Incremental LoadCommand
 template <typename P>
-class IncrementalCommand
-{
+class IncrementalCommand {
 public:
     uint32_t cmd() const INLINE {
         return E::get32(fields.cmd);
