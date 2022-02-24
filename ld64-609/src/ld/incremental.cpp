@@ -17,16 +17,19 @@ namespace incremental {
 template <typename A>
 class Parser {
 public:
+    typedef typename A::P P;
+    typedef typename A::P::E E;
+    typedef typename A::P::uint_t pint_t;
+    
     static bool validFile(const uint8_t *fileContent);
     
     Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime);
     bool canIncrementalUpdate();
+    std::unordered_map<std::string, InputEntrySection<P> *> &incrInputsMap() {
+        return incrInputsMap_;
+    }
     
 private:
-    typedef typename A::P P;
-    typedef typename A::P::E E;
-    typedef typename A::P::uint_t pint_t;
-
     const uint8_t*                              fileContent_;
     uint32_t                                    fileLength_;
     const macho_header<P>*                      fHeader_;
@@ -373,40 +376,47 @@ void Incremental::openIncrementalBinary() {
         }
     }
 
+    
     switch ( _options.architecture() ) {
 #if SUPPORT_ARCH_x86_64
-        case CPU_TYPE_X86_64:
-            if (Parser<x86_64>::validFile(wholeBuffer)) {
-                Parser<x86_64> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
-            }
+        case CPU_TYPE_X86_64: {
+            Parser<x86_64> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+        }
             break;
 #endif
 #if SUPPORT_ARCH_i386
-        case CPU_TYPE_I386:
-            if (Parser<x86>::validFile(wholeBuffer)) {
-                Parser<x86> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
-            }
+        case CPU_TYPE_I386: {
+            Parser<x86> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+        }
             break;
 #endif
 #if SUPPORT_ARCH_arm_any
-        case CPU_TYPE_ARM:
-            if (Parser<arm>::validFile(wholeBuffer)) {
-                Parser<arm> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
-            }
+        case CPU_TYPE_ARM: {
+            Parser<arm> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+        }
             break;
 #endif
 #if SUPPORT_ARCH_arm64
-        case CPU_TYPE_ARM64:
-            if (Parser<arm64>::validFile(wholeBuffer)) {
-                Parser<arm64> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+        case CPU_TYPE_ARM64: {
+            Parser<arm64> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+            for (auto it = _options.getInputFiles().begin(); it != _options.getInputFiles().end(); it++) {
+                time_t rawModTime = it->modTime;
+                auto incrFile = parser.incrInputsMap()[it->path];
+                if (!incrFile) {
+                    fprintf(stderr, "incremental created new file:%s\n", it->path);
+                }
+                time_t incrInputModTime = incrFile->modTime();
+                if (rawModTime > incrInputModTime) {
+                    fprintf(stderr, "incremental changed file:%s\n", it->path);
+                }
             }
+        }
             break;
 #endif
 #if SUPPORT_ARCH_arm64_32
-        case CPU_TYPE_ARM64_32:
-            if (Parser<arm64_32>::validFile(wholeBuffer)) {
+        case CPU_TYPE_ARM64_32: {
                 Parser<arm64_32> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
-            }
+        }
             break;
 #endif
     }
@@ -436,6 +446,10 @@ void Incremental::openIncrementalBinary() {
         // NFS seems to pad the end of the file sometimes.  Calling trunc seems to correct it...
         ::truncate(_options.outputFilePath(), stat_buf.st_size);
     }
+}
+
+void Incremental::update() {
+    
 }
 
 } // namespace incremental

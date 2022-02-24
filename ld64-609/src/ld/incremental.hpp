@@ -300,6 +300,7 @@ public:
     explicit Incremental(const Options &options)
         : _options(options) {}
     void openIncrementalBinary();
+    void update();
     
 private:
     const Options &_options;
