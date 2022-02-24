@@ -2375,7 +2375,6 @@ void IncrementalInputsAtom<A>::encode() const {
 				entry->setType(file->type());
 				entry->setAtomCount(atomCount);
 				ld::incremental::IncrAtomEntry *atomPtr = entry->entryRef().u.relocObj->atoms;
-//				ld::incremental::IncrAtomEntry *atomPtr = entry->entryRef().u;
 				for (auto ait = atoms.begin(); ait != atoms.end(); ait++) {
 					const ld::Internal::FinalSection& sect = static_cast<const ld::Internal::FinalSection&>((*ait)->section());
 					ld::incremental::AtomEntry<P> atomEntry;
