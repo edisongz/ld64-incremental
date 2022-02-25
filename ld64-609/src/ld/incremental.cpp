@@ -20,16 +20,22 @@ public:
     typedef typename A::P P;
     typedef typename A::P::E E;
     typedef typename A::P::uint_t pint_t;
+    using IncrInputMap = std::unordered_map<std::string, InputEntrySection<P> *>;
     
     static bool validFile(const uint8_t *fileContent);
     
     Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime);
     bool canIncrementalUpdate();
-    std::unordered_map<std::string, InputEntrySection<P> *> &incrInputsMap() {
+    IncrInputMap &incrInputsMap() {
         return incrInputsMap_;
     }
     
 private:
+    void checkMachOHeader();
+    void checkIncrementalLoadCommand();
+    void checkIncrementalSection(const macho_segment_command<P>* segCmd, const macho_section<P>* sect);
+    uint8_t loadCommandSizeMask();
+    
     const uint8_t*                              fileContent_;
     uint32_t                                    fileLength_;
     const macho_header<P>*                      fHeader_;
@@ -41,11 +47,6 @@ private:
     std::unordered_map<std::string, InputEntrySection<P> *> incrInputsMap_;
     std::vector<GlobalSymbolTableEntry<P> *> incrSymbols_;
     std::vector<std::string> incrStringPool_;
-    
-    void checkMachOHeader();
-    void checkIncrementalLoadCommand();
-    void checkIncrementalSection(const macho_segment_command<P>* segCmd, const macho_section<P>* sect);
-    uint8_t loadCommandSizeMask();
 };
 
 template <typename A>
@@ -376,8 +377,8 @@ void Incremental::openIncrementalBinary() {
         }
     }
 
-    
-    switch ( _options.architecture() ) {
+    std::set<std::string> incrementalFiles;
+    switch (_options.architecture()) {
 #if SUPPORT_ARCH_x86_64
         case CPU_TYPE_X86_64: {
             Parser<x86_64> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
@@ -404,12 +405,16 @@ void Incremental::openIncrementalBinary() {
                 auto incrFile = parser.incrInputsMap()[it->path];
                 if (!incrFile) {
                     fprintf(stderr, "incremental created new file:%s\n", it->path);
+                    continue;
                 }
                 time_t incrInputModTime = incrFile->modTime();
                 if (rawModTime > incrInputModTime) {
                     fprintf(stderr, "incremental changed file:%s\n", it->path);
+                    continue;
                 }
+                incrementalFiles.insert((*it).path);
             }
+            _options.removeIncrementalInputFiles(incrementalFiles);
         }
             break;
 #endif

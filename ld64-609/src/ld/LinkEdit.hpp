@@ -2302,17 +2302,14 @@ void CodeSignatureAtom::hash(uint8_t* wholeFileBuffer) const
 }
 
 template <typename A>
-class IncrementalInputsAtom : public LinkEditAtom
-{
+class IncrementalInputsAtom : public LinkEditAtom {
 public:
 												IncrementalInputsAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
 													: LinkEditAtom(opts, state, writer, _s_section, 16), _opts(opts) {
 														this->_encoded = true;
 													}
 
-	// overrides of ld::Atom
 	virtual const char*							name() const		{ return "incremental inputs"; }
-	// overrides of LinkEditAtom
 	virtual void								encode() const;
 
 private:
@@ -2417,7 +2414,7 @@ void IncrementalInputsAtom<A>::encode() const {
 				break;
 		}
 	}
-	this->_encodedData.pad_to_size(8);
+	this->_encodedData.pad_to_size(sizeof(pint_t));
 	this->_encoded = true;
 }
 
@@ -2532,9 +2529,8 @@ void IncrementalSymTabAtom<A>::encode() const {
 	this->_encoded = true;
 }
 
-template<typename A>
-class IncrementalStringPoolAtom : public LinkEditAtom
-{
+template <typename A>
+class IncrementalStringPoolAtom : public LinkEditAtom {
 public:
 													IncrementalStringPoolAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
 														: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)), _opts(opts) {
@@ -2545,7 +2541,6 @@ public:
 	virtual void								encode() const;
 
 private:
-	enum { kBufferSize = 0x01000000 };
 	typedef typename A::P						P;
 	typedef typename A::P::E					E;
 	typedef typename A::P::uint_t				pint_t;

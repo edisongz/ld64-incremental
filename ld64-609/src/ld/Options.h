@@ -523,6 +523,7 @@ public:
 	bool						internalSDK() const { return fInternalSDK; }
 	bool						adHocSign() const { return fAdHocSign; }
 	bool 						enableIncrementalLink() const { return fEnableIncrementalLink; }
+	void 						removeIncrementalInputFiles(const std::set<std::string> &incrementalFilenames);
 	bool						platformMismatchesAreWarning() const { return fPlatformMismatchesAreWarning; }
 	bool						warnUnusedDylibs() const { return fWarnUnusedDylibs; }
 	bool						useObjCRelativeMethodLists() const { return fUseObjCRelativeMethodLists; }

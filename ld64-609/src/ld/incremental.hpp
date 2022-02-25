@@ -297,13 +297,13 @@ private:
 
 class Incremental {
 public:
-    explicit Incremental(const Options &options)
+    explicit Incremental(Options &options)
         : _options(options) {}
     void openIncrementalBinary();
     void update();
     
 private:
-    const Options &_options;
+    Options &_options;
 };
 
 } // namespace incremental

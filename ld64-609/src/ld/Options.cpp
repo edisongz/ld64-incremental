@@ -6664,4 +6664,10 @@ bool Options::fromSDK(const char* path) const
 	return false;
 }
 
+void Options::removeIncrementalInputFiles(const std::set<std::string> &incrementalFilenames) {
+	fInputFiles.erase(std::remove_if(fInputFiles.begin(), fInputFiles.end(), [&](Options::FileInfo fileInfo) {
+		return incrementalFilenames.count(fileInfo.path) > 0;
+	}), fInputFiles.end());
+	fprintf(stderr, "incremental file count:%ld", fInputFiles.size());
+}
 

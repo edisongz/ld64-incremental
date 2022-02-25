@@ -1192,7 +1192,7 @@ void InternalState::setSectionSizesAndAlignments()
 
 uint64_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset) {
 	if (_options.enableIncrementalLink()) {
-		if (sect.type() == ld::Section::typeZeroFill) {
+		if (sect.isSectionHidden()) {
 			return 0;
 		}
 		if (strncmp(sect.sectionName(), "__text", 6) == 0 || strncmp(sect.sectionName(), "__data", 6) == 0) {
