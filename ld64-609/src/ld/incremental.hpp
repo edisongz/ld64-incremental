@@ -57,6 +57,7 @@ struct IncrAtomEntry {
 //        relocation_info fixups_[0];
 };
 
+/// Input entry
 struct InputEntry {
     uint32_t fileIndexInStringTable_; // file index in incremental string table
     uint64_t modTime_;                // last link input file modification time
@@ -72,10 +73,18 @@ struct InputEntry {
     } u;
 };
 
+/// Global symbol entry
 struct GlobalSymbolRefEntry {
     uint32_t symbolIndexInStringTable_;
     uint32_t referencedFileCount_;
     uint32_t referencedFileIndex_[0];
+};
+
+/// Incremental patch space
+struct PatchSpace {
+    uint32_t sectionIndex_;
+    uint64_t patchOffset_;
+    uint32_t patchSpace_;
 };
 
 struct macho_incremental_command {
@@ -86,6 +95,8 @@ struct macho_incremental_command {
     uint32_t inputs_size; // file size of data in __INCREMENTAL segment
     uint32_t symtab_off;  // file size of data in __INCREMENTAL segment
     uint32_t symtab_size; // file size of data in __INCREMENTAL segment
+    uint32_t patch_space_off;  // file size of data in __INCREMENTAL segment
+    uint32_t patch_space_size;  // file size of data in __INCREMENTAL segment
     uint32_t strtab_off;  // file size of data in __INCREMENTAL segment
     uint32_t strtab_size; // file size of data in __INCREMENTAL segment
 };
@@ -219,7 +230,25 @@ public:
     typedef typename P::E E;
 
 private:
-    GlobalSymbolRefEntry entry;
+    struct GlobalSymbolRefEntry entry;
+};
+
+template <typename P>
+class PatchSpaceSectionEntry {
+public:
+    uint32_t sectionIndex() const INLINE { return E::get32(fields.sectionIndex_); }
+    void setSectionIndex(uint32_t value) INLINE { E::set32(fields.sectionIndex_, value); }
+    
+    uint64_t patchOffset() const INLINE { return E::get64(fields.patchOffset_); }
+    void setPatchOffset(uint64_t value) INLINE { E::set64(fields.patchOffset_, value); }
+
+    uint32_t patchSpace() const INLINE { return E::get32(fields.patchSpace_); }
+    void setPatchSpace(uint32_t value) INLINE { E::set32(fields.patchSpace_, value); }
+
+    typedef typename P::E E;
+
+private:
+    struct PatchSpace fields;
 };
 
 // Incremental LoadCommand
@@ -281,6 +310,12 @@ public:
     void set_strtab_off(uint32_t value) INLINE {
         E::set32(fields.strtab_off, value);
     }
+    
+    uint32_t patch_space_off() const INLINE { return E::get32(fields.patch_space_off); }
+    void set_patch_space_off(uint32_t value) INLINE { E::set32(fields.patch_space_off, value); }
+    
+    uint32_t patch_space_size() const INLINE { return E::get32(fields.patch_space_size); }
+    void set_patch_space_size(uint32_t value) INLINE { E::set32(fields.patch_space_size, value); }
 
     uint32_t strtab_size() const INLINE {
         return E::get32(fields.strtab_size);
@@ -297,6 +332,8 @@ private:
 
 class Incremental {
 public:
+    static bool isIncrementalOutputValid(const Options &options);
+    
     explicit Incremental(Options &options)
         : _options(options) {}
     void openIncrementalBinary();

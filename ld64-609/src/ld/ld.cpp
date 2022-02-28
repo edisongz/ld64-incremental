@@ -127,7 +127,7 @@ private:
 	bool									inMoveRWChain(const ld::Atom& atom, const char* filePath, bool followedBackBranch, const char*& dstSeg, bool& wildCardMatch);
 	bool									inMoveROChain(const ld::Atom& atom, const char* filePath, const char*& dstSeg, bool& wildCardMatch);
 	bool									inMoveAuthChain(const ld::Atom& atom, bool followedBackBranch, const char*& dstSeg);
-	uint64_t								incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset);
+	uint32_t								incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset);
 
 	class FinalSection : public ld::Internal::FinalSection 
 	{
@@ -1155,8 +1155,9 @@ void InternalState::setSectionSizesAndAlignments()
 							throwf("weak external symbol: %s", atom->name());
 				}
 			}
-			
-			offset += incrementalPatchSpace(*sect, offset);
+			sect->patchSpaceOffset_ = offset;
+			sect->patchSpaceSize_ = incrementalPatchSpace(*sect, offset);
+			offset += sect->patchSpaceSize_;
 			
 			sect->size = offset;
 			// section alignment is that of a contained atom with the greatest alignment
@@ -1190,14 +1191,14 @@ void InternalState::setSectionSizesAndAlignments()
 
 }
 
-uint64_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset) {
+uint32_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset) {
 	if (_options.enableIncrementalLink()) {
 		if (sect.isSectionHidden()) {
 			return 0;
 		}
 		if (strncmp(sect.sectionName(), "__text", 6) == 0 || strncmp(sect.sectionName(), "__data", 6) == 0) {
-			uint64_t incrementalPatchSpace = (static_cast<uint64_t>(offset * 0.1) + 7) & (-8);
-			fprintf(stderr, "incremental segment:%s, section:%s, incremental padding space:%llu\n", sect.segmentName(), sect.sectionName(), incrementalPatchSpace);
+			uint32_t incrementalPatchSpace = (static_cast<uint64_t>(offset * 0.1) + 7) & (-8);
+			fprintf(stderr, "incremental segment:%s, section:%s, incremental padding space:%u\n", sect.segmentName(), sect.sectionName(), incrementalPatchSpace);
 			return incrementalPatchSpace;
 		}
 	}

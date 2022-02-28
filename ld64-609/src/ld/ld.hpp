@@ -1282,7 +1282,8 @@ public:
 												fileOffset(0), size(0), alignment(0),
 												indirectSymTabStartIndex(0), indirectSymTabElementSize(0),
 												relocStart(0), relocCount(0), 
-												hasLocalRelocs(false), hasExternalRelocs(false) {}
+												hasLocalRelocs(false), hasExternalRelocs(false),
+												patchSpaceOffset_(0), patchSpaceSize_(0) {}
 		std::vector<const Atom*>		atoms;
 		uint64_t						address;
 		uint64_t						fileOffset;
@@ -1295,6 +1296,8 @@ public:
 		uint32_t						relocCount;
 		bool							hasLocalRelocs;
 		bool							hasExternalRelocs;
+		uint64_t						patchSpaceOffset_;
+		uint32_t						patchSpaceSize_;
 	};
 	
 	typedef std::map<const ld::Atom*, FinalSection*>	AtomToSection;		

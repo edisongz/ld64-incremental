@@ -57,6 +57,7 @@
 #include "SymbolTable.h"
 #include "Resolver.h"
 #include "parsers/lto_file.h"
+#include "incremental.hpp"
 
 #include "configure.h"
 
@@ -1153,6 +1154,9 @@ public:
 
 void Resolver::deadStripOptimize(bool force)
 {
+	if (_options.enableIncrementalLink() && ld::incremental::Incremental::isIncrementalOutputValid(_options)) {
+		return;
+	}
 	// only do this optimization with -dead_strip
 	if ( ! _options.deadCodeStrip() ) 
 		return;
@@ -1453,6 +1457,9 @@ bool Resolver::printReferencedBy(const char* name, SymbolTable::IndirectBindingS
 
 void Resolver::checkUndefines(bool force)
 {
+	if (_options.enableIncrementalLink() && ld::incremental::Incremental::isIncrementalOutputValid(_options)) {
+		return;
+	}
 	// when using LTO, undefines are checked after bitcode is optimized
 	if ( _haveLLVMObjs && !force )
 		return;
@@ -1707,6 +1714,9 @@ void Resolver::fillInInternalState()
 
 void Resolver::fillInEntryPoint()
 {
+	if (_options.enableIncrementalLink() && ld::incremental::Incremental::isIncrementalOutputValid(_options)) {
+		return;
+	}
 	_internal.entryPoint = this->entryPoint(true);
 }
 

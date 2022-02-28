@@ -25,6 +25,7 @@ public:
     static bool validFile(const uint8_t *fileContent);
     
     Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime);
+    bool hasValidEntryPoint() const { return entryPoint_ != nullptr; }
     bool canIncrementalUpdate();
     IncrInputMap &incrInputsMap() {
         return incrInputsMap_;
@@ -39,19 +40,21 @@ private:
     const uint8_t*                              fileContent_;
     uint32_t                                    fileLength_;
     const macho_header<P>*                      fHeader_;
+    const macho_entry_point_command<P>*         entryPoint_;
     const InputEntrySection<P>*                 fIncrementalInputSection_;
     const GlobalSymbolTableEntry<P>*            fIncrementalSymbolSection_;
+    const PatchSpaceSectionEntry<P>*             fIncrementalPatchSpaceSection_;
     const char*                                 fIncrementalStrings_;
     bool fSlidableImage_;
     std::vector<InputEntrySection<P> *> incrInputs_;
     std::unordered_map<std::string, InputEntrySection<P> *> incrInputsMap_;
     std::vector<GlobalSymbolTableEntry<P> *> incrSymbols_;
     std::vector<std::string> incrStringPool_;
+    std::unordered_map<uint32_t, PatchSpaceSectionEntry<P> *> incrPatchSpaceMap_;
 };
 
 template <typename A>
-Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime) : fileContent_(fileContent), fileLength_(fileLength), fHeader_(nullptr),
-fIncrementalInputSection_(nullptr), fIncrementalSymbolSection_(nullptr), fIncrementalStrings_(nullptr) {
+Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime) : fileContent_(fileContent), fileLength_(fileLength), fHeader_(nullptr), entryPoint_(nullptr), fIncrementalInputSection_(nullptr), fIncrementalSymbolSection_(nullptr), fIncrementalPatchSpaceSection_(nullptr), fIncrementalStrings_(nullptr) {
     if (!validFile(fileContent)) {
         throw "not a mach-o file that can be checked";
     }
@@ -213,60 +216,79 @@ void Parser<A>::checkIncrementalLoadCommand() {
         if (endOfCmd > endOfFile) {
             throwf("load command #%d extends beyond the end of the file", i);
         }
-        if (cmd->cmd() == LC_INCREMENTAL) {
-            incrementalCommand = (IncrementalCommand<P> *)cmd;
-            // incremental string pool
-            fIncrementalStrings_ = (const char *)((uint8_t *)fHeader_ + incrementalCommand->strtab_off());
-            char *stringStart = const_cast<char *>(fIncrementalStrings_);
-            char *stringEnd = const_cast<char *>(fIncrementalStrings_) + incrementalCommand->strtab_size();
-            uint32_t stringIdx = 0;
-            while (stringStart < stringEnd) {
-                const char *symName = &stringStart[stringIdx++];
-                if (!symName || strlen(symName) == 0) {
-                    break;
+        switch (cmd->cmd()) {
+            case LC_MAIN: {
+                if (fHeader_->filetype() != MH_EXECUTE) {
+                    throw "LC_MAIN can only be used in MH_EXECUTE file types";
                 }
-                incrStringPool_.push_back(symName);
-                stringStart += strlen(symName);
+                entryPoint_ =  (macho_entry_point_command<P>*)cmd;
             }
-            
-            // incremental input files
-            fIncrementalInputSection_ = (const InputEntrySection<P> *)((uint8_t *)fHeader_ + incrementalCommand->inputs_off());
-            InputEntrySection<P> *incrInputPtr = const_cast<InputEntrySection<P> *>(fIncrementalInputSection_);
-            for (uint32_t index = 0; index < incrementalCommand->file_count(); index++) {
-                size_t size = sizeof(InputEntrySection<P>);
-                switch (incrInputPtr->type()) {
-                    case ld::File::Type::Reloc: {
-                        uint32_t atomCount = incrInputPtr->atomCount();
-                        size = 5 * sizeof(uint32_t) + sizeof(ld::incremental::AtomEntry<P>) * atomCount;
-                    } break;
-                    case ld::File::Type::Archive: {
-                        
-                    } break;
-                    case ld::File::Type::Dylib: {
-                        
-                    } break;
-                    case ld::File::Type::Other: {
-                        
-                    } break;
-                    default:
+                break;
+            case LC_INCREMENTAL: {
+                incrementalCommand = (IncrementalCommand<P> *)cmd;
+                // incremental string pool
+                fIncrementalStrings_ = (const char *)((uint8_t *)fHeader_ + incrementalCommand->strtab_off());
+                char *stringStart = const_cast<char *>(fIncrementalStrings_);
+                char *stringEnd = const_cast<char *>(fIncrementalStrings_) + incrementalCommand->strtab_size();
+                uint32_t stringIdx = 0;
+                while (stringStart < stringEnd) {
+                    const char *symName = &stringStart[stringIdx++];
+                    if (!symName || strlen(symName) == 0) {
                         break;
+                    }
+                    incrStringPool_.push_back(symName);
+                    stringStart += strlen(symName);
                 }
-                incrInputs_.push_back(incrInputPtr);
-                incrInputsMap_[incrStringPool_[incrInputPtr->fileIndexInStringTable()]] = incrInputPtr;
-                incrInputPtr = (InputEntrySection<P> *)(((uint8_t *)incrInputPtr) + size);
-            }
-            
-            // incremental global symbol table
-            fIncrementalSymbolSection_ = (const GlobalSymbolTableEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->symtab_off());
-            GlobalSymbolTableEntry<P> *symbolStart = const_cast<GlobalSymbolTableEntry<P> *>(fIncrementalSymbolSection_);
-            const GlobalSymbolTableEntry<P> *symbolEnd = fIncrementalSymbolSection_ + incrementalCommand->symtab_size();
-            while (symbolStart < symbolEnd) {
-                if ((symbolEnd - symbolStart) < 8) {
-                    break;
+                
+                // incremental input files
+                fIncrementalInputSection_ = (const InputEntrySection<P> *)((uint8_t *)fHeader_ + incrementalCommand->inputs_off());
+                InputEntrySection<P> *incrInputPtr = const_cast<InputEntrySection<P> *>(fIncrementalInputSection_);
+                for (uint32_t index = 0; index < incrementalCommand->file_count(); index++) {
+                    size_t size = sizeof(InputEntrySection<P>);
+                    switch (incrInputPtr->type()) {
+                        case ld::File::Type::Reloc: {
+                            uint32_t atomCount = incrInputPtr->atomCount();
+                            size = 5 * sizeof(uint32_t) + sizeof(ld::incremental::AtomEntry<P>) * atomCount;
+                        } break;
+                        case ld::File::Type::Archive: {
+                            
+                        } break;
+                        case ld::File::Type::Dylib: {
+                            
+                        } break;
+                        case ld::File::Type::Other: {
+                            
+                        } break;
+                        default:
+                            break;
+                    }
+                    incrInputs_.push_back(incrInputPtr);
+                    incrInputsMap_[incrStringPool_[incrInputPtr->fileIndexInStringTable()]] = incrInputPtr;
+                    incrInputPtr = (InputEntrySection<P> *)(((uint8_t *)incrInputPtr) + size);
                 }
-                incrSymbols_.push_back(symbolStart);
-                symbolStart = (GlobalSymbolTableEntry<P> *)(((uint8_t *)symbolStart) + (2 + symbolStart->referencedFileCount_()) * sizeof(uint32_t));
+                
+                // incremental global symbol table
+                fIncrementalSymbolSection_ = (const GlobalSymbolTableEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->symtab_off());
+                GlobalSymbolTableEntry<P> *symbolStart = const_cast<GlobalSymbolTableEntry<P> *>(fIncrementalSymbolSection_);
+                const GlobalSymbolTableEntry<P> *symbolEnd = (const GlobalSymbolTableEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->symtab_off() + incrementalCommand->symtab_size());
+                while (symbolStart < symbolEnd) {
+                    if ((symbolEnd - symbolStart) < 8) {
+                        break;
+                    }
+                    incrSymbols_.push_back(symbolStart);
+                    symbolStart = (GlobalSymbolTableEntry<P> *)(((uint8_t *)symbolStart) + (2 + symbolStart->referencedFileCount_()) * sizeof(uint32_t));
+                }
+                
+                // patch space
+                fIncrementalPatchSpaceSection_ = (const PatchSpaceSectionEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off());
+                const PatchSpaceSectionEntry<P> *patchSpaceEnd = (const PatchSpaceSectionEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off() + incrementalCommand->patch_space_size());
+                for (PatchSpaceSectionEntry<P> *p = const_cast<PatchSpaceSectionEntry<P> *>(fIncrementalPatchSpaceSection_); p != patchSpaceEnd; p++) {
+                    incrPatchSpaceMap_[p->sectionIndex()] = p;
+                }
             }
+                break;
+            default:
+                break;
         }
         cmd = (const macho_load_command<P>*)endOfCmd;
     }
@@ -276,6 +298,8 @@ template <typename A>
 void Parser<A>::checkIncrementalSection(const macho_segment_command<P> *segCmd, const macho_section<P> *sect) {
     
 }
+
+#pragma mark - Incremental
 
 static int sDescriptorOfPathToRemove = -1;
 static void removePathAndExit(int sig) {
@@ -287,6 +311,10 @@ static void removePathAndExit(int sig) {
     fprintf(stderr, "ld: interrupted\n");
     // we are in a sig handler, don't do clean ups
     _exit(1);
+}
+
+bool Incremental::isIncrementalOutputValid(const Options &options) {
+    return access(options.outputFilePath(), F_OK) == 0;
 }
 
 void Incremental::openIncrementalBinary() {
@@ -400,7 +428,13 @@ void Incremental::openIncrementalBinary() {
 #if SUPPORT_ARCH_arm64
         case CPU_TYPE_ARM64: {
             Parser<arm64> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+            if (parser.hasValidEntryPoint()) {
+                _options.markIgnoreEntryPoint();
+            }
             for (auto it = _options.getInputFiles().begin(); it != _options.getInputFiles().end(); it++) {
+                if (!it->fromFileList) {
+                    continue;
+                }
                 time_t rawModTime = it->modTime;
                 auto incrFile = parser.incrInputsMap()[it->path];
                 if (!incrFile) {

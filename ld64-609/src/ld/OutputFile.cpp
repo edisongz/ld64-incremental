@@ -93,6 +93,7 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state)
 		threadedPageStartsSection(NULL), codeSignatureSection(NULL),
 		incrementalSection(nullptr),
 		incrementalSymTabSection(nullptr),
+		incrementalPatchSpaceSection(nullptr),
 		incrementalStringSection(nullptr),
 		_options(opts),
 		_hasDyldInfo(opts.makeCompressedDyldInfo() || state.cantUseChainedFixups),
@@ -134,6 +135,7 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state)
 		_optimizationHintsAtom(NULL),
 		_incrementalAtom(nullptr),
 		_incrementalSymTabAtom(nullptr),
+		_incrementalPatchSpaceAtom(nullptr),
 		_incrementalStringTableAtom(nullptr),
 		_codeSignatureAtom(NULL)
 {
@@ -321,6 +323,8 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 		_incrementalAtom->encode();
 		assert(_incrementalSymTabAtom != nullptr);
 		_incrementalSymTabAtom->encode();
+		assert(_incrementalPatchSpaceAtom != nullptr);
+		_incrementalPatchSpaceAtom->encode();
 		assert(_incrementalStringTableAtom != nullptr);
 		_incrementalStringTableAtom->encode();
 	}
@@ -4681,6 +4685,8 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				incrementalSection = state.addAtom(*_incrementalAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
+				_incrementalPatchSpaceAtom = new IncrementalPatchSpaceAtom<arm64>(_options, state, *this);
+				incrementalPatchSpaceSection = state.addAtom(*_incrementalPatchSpaceAtom);
 				_incrementalStringTableAtom = new IncrementalStringPoolAtom<arm64>(_options, state, *this);
 				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
 			}

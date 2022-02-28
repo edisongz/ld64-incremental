@@ -2530,6 +2530,52 @@ void IncrementalSymTabAtom<A>::encode() const {
 }
 
 template <typename A>
+class IncrementalPatchSpaceAtom : public LinkEditAtom {
+public:
+												IncrementalPatchSpaceAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+													: LinkEditAtom(opts, state, writer, _s_section, 16), _opts(opts) {
+														this->_encoded = true;
+													}
+
+	virtual const char*							name() const		{ return "incremental patch space atom"; }
+	virtual void								encode() const;
+
+private:
+	typedef typename A::P						P;
+	typedef typename A::P::E					E;
+	typedef typename A::P::uint_t				pint_t;
+	const Options& 				_opts;
+	
+	static ld::Section			_s_section;
+};
+
+template <typename A>
+ld::Section IncrementalPatchSpaceAtom<A>::_s_section("__LINKEDIT", "__incr_patch", ld::Section::typeLinkEdit, true);
+
+template <typename A>
+void IncrementalPatchSpaceAtom<A>::encode() const {
+	uint32_t index = 0;
+	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); ++sit) {
+		ld::Internal::FinalSection *sect = *sit;
+		if (sect->isSectionHidden()) {
+			index++;
+			continue;
+		}
+		if (strncmp(sect->sectionName(), "__text", 6) == 0 || strncmp(sect->sectionName(), "__data", 6) == 0) {
+			ld::incremental::PatchSpaceSectionEntry<P> entry;
+			entry.setSectionIndex(index);
+			entry.setPatchOffset(sect->fileOffset + sect->patchSpaceOffset_);
+			entry.setPatchSpace(sect->patchSpaceSize_);
+			this->_encodedData.append_mem(&entry, sizeof(ld::incremental::PatchSpaceSectionEntry<P>));
+		}
+		index++;
+	}
+	
+	this->_encodedData.pad_to_size(sizeof(pint_t));
+	this->_encoded = true;
+}
+
+template <typename A>
 class IncrementalStringPoolAtom : public LinkEditAtom {
 public:
 													IncrementalStringPoolAtom(const Options& opts, ld::Internal& state, OutputFile& writer)

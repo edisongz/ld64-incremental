@@ -199,7 +199,7 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 	_hasDyldLoadCommand = ((opts.outputKind() == Options::kDynamicExecutable) || (_options.outputKind() == Options::kDyld));
 	_hasDylibIDLoadCommand = (opts.outputKind() == Options::kDynamicLibrary);
 	_hasThreadLoadCommand = _options.needsThreadLoadCommand();
-	_hasEntryPointLoadCommand = _options.needsEntryPointLoadCommand();
+	_hasEntryPointLoadCommand = _options.needsEntryPointLoadCommand() && !_options.ignoreEntryPoint();
 	_hasEncryptionLoadCommand = opts.makeEncryptable();
 	_hasSplitSegInfoLoadCommand = opts.sharedRegionEligible();
 	_hasRoutinesLoadCommand = (opts.initFunctionName() != NULL) && (state.entryPoint != NULL);
@@ -1656,6 +1656,8 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyIncrementalLoadCommand(uint8_t *p) co
 	cmd->set_inputs_size(_writer.incrementalSection->size);
 	cmd->set_symtab_off(_writer.incrementalSymTabSection->fileOffset);
 	cmd->set_symtab_size(_writer.incrementalSymTabSection->size);
+	cmd->set_patch_space_off(_writer.incrementalPatchSpaceSection->fileOffset);
+	cmd->set_patch_space_size(_writer.incrementalPatchSpaceSection->size);
 	cmd->set_strtab_off(_writer.incrementalStringSection->fileOffset);
 	cmd->set_strtab_size(_writer.incrementalStringSection->size);
 	return p + cmd->cmdsize();

@@ -98,6 +98,7 @@ public:
 	ld::Internal::FinalSection*	codeSignatureSection;
 	ld::Internal::FinalSection*	incrementalSection;
 	ld::Internal::FinalSection*	incrementalSymTabSection;
+	ld::Internal::FinalSection*	incrementalPatchSpaceSection;
 	ld::Internal::FinalSection*	incrementalStringSection;
 
 	struct RebaseInfo {
@@ -430,6 +431,7 @@ public:
 	class LinkEditAtom*						_chainedInfoAtom;
 	class LinkEditAtom*						_incrementalAtom;
 	class LinkEditAtom*						_incrementalSymTabAtom;
+	class LinkEditAtom*						_incrementalPatchSpaceAtom;
 	class LinkEditAtom*						_incrementalStringTableAtom;
 	class CodeSignatureAtom*				_codeSignatureAtom;
 
