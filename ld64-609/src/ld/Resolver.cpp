@@ -1154,7 +1154,7 @@ public:
 
 void Resolver::deadStripOptimize(bool force)
 {
-	if (_options.enableIncrementalLink() && ld::incremental::Incremental::isIncrementalOutputValid(_options)) {
+	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
 		return;
 	}
 	// only do this optimization with -dead_strip
@@ -1457,7 +1457,7 @@ bool Resolver::printReferencedBy(const char* name, SymbolTable::IndirectBindingS
 
 void Resolver::checkUndefines(bool force)
 {
-	if (_options.enableIncrementalLink() && ld::incremental::Incremental::isIncrementalOutputValid(_options)) {
+	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
 		return;
 	}
 	// when using LTO, undefines are checked after bitcode is optimized
@@ -1714,7 +1714,7 @@ void Resolver::fillInInternalState()
 
 void Resolver::fillInEntryPoint()
 {
-	if (_options.enableIncrementalLink() && ld::incremental::Incremental::isIncrementalOutputValid(_options)) {
+	if (_options.enableIncrementalLink() && _options.ignoreEntryPoint()) {
 		return;
 	}
 	_internal.entryPoint = this->entryPoint(true);

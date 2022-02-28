@@ -2561,9 +2561,9 @@ void IncrementalPatchSpaceAtom<A>::encode() const {
 			index++;
 			continue;
 		}
-		if (strncmp(sect->sectionName(), "__text", 6) == 0 || strncmp(sect->sectionName(), "__data", 6) == 0) {
+		if (strcmp(sect->segmentName(), "__TEXT") == 0 || strcmp(sect->segmentName(), "__DATA") == 0 || strcmp(sect->segmentName(), "__DATA_CONST") == 0) {
 			ld::incremental::PatchSpaceSectionEntry<P> entry;
-			entry.setSectionIndex(index);
+			entry.setSectname(sect->sectionName());
 			entry.setPatchOffset(sect->fileOffset + sect->patchSpaceOffset_);
 			entry.setPatchSpace(sect->patchSpaceSize_);
 			this->_encodedData.append_mem(&entry, sizeof(ld::incremental::PatchSpaceSectionEntry<P>));

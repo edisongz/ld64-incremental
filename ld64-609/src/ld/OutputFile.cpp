@@ -76,8 +76,7 @@ uint32_t sAdrpNA = 0;
 uint32_t sAdrpNoped = 0;
 uint32_t sAdrpNotNoped = 0;
 
-
-OutputFile::OutputFile(const Options& opts, ld::Internal& state) 
+OutputFile::OutputFile(const Options& opts, ld::Internal& state, ld::incremental::Incremental &incremental)
 	:
 		usesWeakExternalSymbols(false), overridesWeakExternalSymbols(false), 
 		_noReExportedDylibs(false), pieDisabled(false), hasDataInCode(false), 
@@ -96,6 +95,7 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state)
 		incrementalPatchSpaceSection(nullptr),
 		incrementalStringSection(nullptr),
 		_options(opts),
+		_incremental(incremental),
 		_hasDyldInfo(opts.makeCompressedDyldInfo() || state.cantUseChainedFixups),
 		_hasExportsTrie(opts.makeChainedFixups() && !state.cantUseChainedFixups && _options.dyldLoadsOutput()),
 		_hasChainedFixups(opts.makeChainedFixups() && !state.cantUseChainedFixups && _options.dyldOrKernelLoadsOutput()),
@@ -162,6 +162,10 @@ void OutputFile::dumpAtomsBySection(ld::Internal& state, bool printAtoms)
 
 void OutputFile::write(ld::Internal& state)
 {
+	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+		this->writeOutputFileIncremental(state);
+		return;
+	}
 	this->buildDylibOrdinalMapping(state);
 	this->addLoadCommands(state);
 	this->addLinkEdit(state);
@@ -3580,7 +3584,61 @@ void OutputFile::writeAtoms(ld::Internal& state, uint8_t* wholeBuffer)
 	}
 }
 
-
+void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer) {
+	uint64_t fileOffsetOfEndOfLastAtom = 0;
+	bool lastAtomUsesNoOps = false;
+	uint64_t baseAddress = _options.baseAddress();
+	uint32_t sectionIndex = 0;
+	for (auto sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
+		sectionIndex++;
+		ld::Internal::FinalSection *sect = *sit;
+		if ((sect->type() == ld::Section::typeMachHeader) && (_options.outputKind() != Options::kPreload)) {
+			baseAddress = sect->address;
+		}
+		if (sect->isSectionHidden()) {
+			continue;
+		}
+		if (takesNoDiskSpace(sect)) {
+			continue;
+		}
+		const bool sectionUsesNops = (sect->type() == ld::Section::typeCode);
+		//fprintf(stderr, "file offset=0x%08llX, section %s\n", sect->fileOffset, sect->sectionName());
+		bool lastAtomWasThumb = false;
+		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+			ld::Atom *atom = const_cast<ld::Atom *>(*ait);
+			if (atom->definition() == ld::Atom::definitionProxy) {
+				continue;
+			}
+			if (!atom->file()) {
+				continue;
+			}
+			try {
+				ld::incremental::PatchSpace patchSpace = _incremental.patchSpace(sect->sectionName());
+				if (patchSpace.patchSpace_ == 0) {
+					continue;
+				}
+				uint64_t patchFileOffset = patchSpace.patchOffset_;
+				if (atom->size() > patchSpace.patchSpace_) {
+					continue;
+				}
+//				atom->setSectionStartAddress(<#uint64_t a#>);
+				// check for alignment padding between atoms
+				if ((patchFileOffset != fileOffsetOfEndOfLastAtom) && lastAtomUsesNoOps ) {
+					this->copyNoOps(&wholeBuffer[fileOffsetOfEndOfLastAtom], &wholeBuffer[patchFileOffset], lastAtomWasThumb);
+				}
+				// copy atom content
+				atom->copyRawContent(&wholeBuffer[patchFileOffset]);
+				// apply fix ups
+//				this->applyFixUps(state, baseAddress, atom, &wholeBuffer[patchFileOffset]);
+				fileOffsetOfEndOfLastAtom = patchFileOffset + atom->size();
+				lastAtomUsesNoOps = sectionUsesNops;
+				lastAtomWasThumb = atom->isThumb();
+			} catch (const char* msg) {
+				throwf("%s in '%s' from %s", msg, atom->name(), atom->safeFilePath());
+			}
+		}
+	}
+}
 
 
 // decode: if target26 > max_pointer, then value = signext(target26)-max_pointer
@@ -3947,6 +4005,13 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 		if ( ::rename(_options.reverseMapTempPath().c_str(), outputMapPath) != 0 )
 			throwf("could not create bcsymbolmap file: %s", outputMapPath);
 	}
+}
+
+void OutputFile::writeOutputFileIncremental(ld::Internal &state) {
+//	int fd = _incremental.fd();
+	uint8_t *wholeBuffer = _incremental.wholeBuffer();
+	writeAtomsIncremental(state, wholeBuffer);
+	_incremental.closeBinary();
 }
 
 struct AtomByNameSorter

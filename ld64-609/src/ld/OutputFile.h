@@ -45,6 +45,7 @@
 
 #include "Options.h"
 #include "ld.hpp"
+#include "incremental.hpp"
 
 namespace ld {
 namespace tool {
@@ -52,7 +53,7 @@ namespace tool {
 class OutputFile
 {
 public:
-								OutputFile(const Options& opts, ld::Internal& state);
+								OutputFile(const Options& opts, ld::Internal& state, ld::incremental::Incremental &incremental);
 
 	
 	// iterates all atoms in initial files
@@ -183,6 +184,7 @@ public:
 
 private:
 	void						writeAtoms(ld::Internal& state, uint8_t* wholeBuffer);
+	void						writeAtomsIncremental(ld::Internal& state, uint8_t* wholeBuffer);
 	void						computeContentUUID(ld::Internal& state, uint8_t* wholeBuffer);
 	void						buildDylibOrdinalMapping(ld::Internal&);
 	bool						hasOrdinalForInstallPath(const char* path, int* ordinal);
@@ -191,6 +193,7 @@ private:
 	void						addPreloadLinkEdit(ld::Internal& state);
 	void						generateLinkEditInfo(ld::Internal& state);
 	void						buildSymbolTable(ld::Internal& state);
+	void						writeOutputFileIncremental(ld::Internal& state);
 	void						writeOutputFile(ld::Internal& state);
 	void						addSectionRelocs(ld::Internal& state, ld::Internal::FinalSection* sect,  
 												const ld::Atom* atom, ld::Fixup* fixupWithTarget, 
@@ -362,6 +365,7 @@ private:
 
 
 	const Options&							_options;
+	ld::incremental::Incremental&			_incremental;
 	std::map<const ld::dylib::File*, int>	_dylibToOrdinal;
 	std::vector<const ld::dylib::File*>		_dylibsToLoad;
 	std::vector<const char*>				_dylibOrdinalPaths;

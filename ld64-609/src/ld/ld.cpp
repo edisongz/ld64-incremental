@@ -127,7 +127,7 @@ private:
 	bool									inMoveRWChain(const ld::Atom& atom, const char* filePath, bool followedBackBranch, const char*& dstSeg, bool& wildCardMatch);
 	bool									inMoveROChain(const ld::Atom& atom, const char* filePath, const char*& dstSeg, bool& wildCardMatch);
 	bool									inMoveAuthChain(const ld::Atom& atom, bool followedBackBranch, const char*& dstSeg);
-	uint32_t								incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset);
+	uint32_t								incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset, uint16_t maxAlignment);
 
 	class FinalSection : public ld::Internal::FinalSection 
 	{
@@ -1156,7 +1156,7 @@ void InternalState::setSectionSizesAndAlignments()
 				}
 			}
 			sect->patchSpaceOffset_ = offset;
-			sect->patchSpaceSize_ = incrementalPatchSpace(*sect, offset);
+			sect->patchSpaceSize_ = incrementalPatchSpace(*sect, offset, maxAlignment);
 			offset += sect->patchSpaceSize_;
 			
 			sect->size = offset;
@@ -1191,13 +1191,14 @@ void InternalState::setSectionSizesAndAlignments()
 
 }
 
-uint32_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset) {
+uint32_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset, uint16_t maxAlignment) {
 	if (_options.enableIncrementalLink()) {
 		if (sect.isSectionHidden()) {
 			return 0;
 		}
-		if (strncmp(sect.sectionName(), "__text", 6) == 0 || strncmp(sect.sectionName(), "__data", 6) == 0) {
-			uint32_t incrementalPatchSpace = (static_cast<uint64_t>(offset * 0.1) + 7) & (-8);
+		if (strcmp(sect.segmentName(), "__TEXT") == 0 || strcmp(sect.segmentName(), "__DATA") == 0 || strcmp(sect.segmentName(), "__DATA_CONST") == 0) {
+			uint64_t alignment = 1 << maxAlignment;
+			uint32_t incrementalPatchSpace = (static_cast<uint64_t>(offset * 0.1) + (alignment - 1)) & (-alignment);
 			fprintf(stderr, "incremental segment:%s, section:%s, incremental padding space:%u\n", sect.segmentName(), sect.sectionName(), incrementalPatchSpace);
 			return incrementalPatchSpace;
 		}
@@ -1512,9 +1513,9 @@ int main(int argc, const char* argv[])
 		Options options(argc, argv);
 		InternalState state(options);
 		
+		ld::incremental::Incremental incrementalContext(options);
 		if (options.enableIncrementalLink()) {
-			ld::incremental::Incremental incrementalContext(options);
-			incrementalContext.openIncrementalBinary();
+			incrementalContext.openBinary();
 		}
 		
 		// allow libLTO to be overridden by command line -lto_library
@@ -1575,7 +1576,7 @@ int main(int argc, const char* argv[])
 
 		// write output file
 		statistics.startOutput = mach_absolute_time();
-		ld::tool::OutputFile out(options, state);
+		ld::tool::OutputFile out(options, state, incrementalContext);
 		out.write(state);
 		statistics.startDone = mach_absolute_time();
 		

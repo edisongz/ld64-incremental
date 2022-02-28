@@ -524,8 +524,10 @@ public:
 	bool						adHocSign() const { return fAdHocSign; }
 	bool 						enableIncrementalLink() const { return fEnableIncrementalLink; }
 	void 						removeIncrementalInputFiles(const std::set<std::string> &incrementalFilenames);
+	bool						validIncrementalUpdate() const { return fValidIncrementeUpdate; }
 	bool						ignoreEntryPoint() const { return fIgnoreEntryPointIncrementalLink; }
 	void 						markIgnoreEntryPoint();
+	void 						markValidIncrementalUpdate();
 	bool						platformMismatchesAreWarning() const { return fPlatformMismatchesAreWarning; }
 	bool						warnUnusedDylibs() const { return fWarnUnusedDylibs; }
 	bool						useObjCRelativeMethodLists() const { return fUseObjCRelativeMethodLists; }
@@ -858,6 +860,7 @@ private:
 	bool								fWarnUnusedDylibsForceOff;
 	bool								fAdHocSign;
 	bool 								fEnableIncrementalLink;
+	bool 								fValidIncrementeUpdate;
 	bool								fIgnoreEntryPointIncrementalLink;
 	bool								fPlatformMismatchesAreWarning;
 	bool								fForceObjCRelativeMethodListsOn;

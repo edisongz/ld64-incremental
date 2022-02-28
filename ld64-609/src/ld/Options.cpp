@@ -207,7 +207,7 @@ Options::Options(int argc, const char* argv[])
 	  fZeroModTimeInDebugMap(false), fBitcodeKind(kBitcodeProcess),
 	  fDebugInfoStripping(kDebugInfoMinimal), fTraceOutputFile(NULL), fPlatfromVersionCmdFound(false), fInternalSDK(false),
 	  fWarnUnusedDylibs(false), fWarnUnusedDylibsForceOn(false), fWarnUnusedDylibsForceOff(false), fAdHocSign(false),
-	  fEnableIncrementalLink(false), fIgnoreEntryPointIncrementalLink(false),
+	  fEnableIncrementalLink(false), fValidIncrementeUpdate(false), fIgnoreEntryPointIncrementalLink(false),
 	  fPlatformMismatchesAreWarning(false),
 	  fForceObjCRelativeMethodListsOn(false), fForceObjCRelativeMethodListsOff(false), fUseObjCRelativeMethodLists(false),
 	  fSaveTempFiles(false), fLinkSnapshot(this), fSnapshotRequested(false), fPipelineFifo(NULL),
@@ -6668,10 +6668,13 @@ void Options::removeIncrementalInputFiles(const std::set<std::string> &increment
 	fInputFiles.erase(std::remove_if(fInputFiles.begin(), fInputFiles.end(), [&](const Options::FileInfo &fileInfo) {
 		return incrementalFilenames.count(fileInfo.path) > 0;
 	}), fInputFiles.end());
-	fprintf(stderr, "incremental file count:%ld", fInputFiles.size());
 }
 
 void Options::markIgnoreEntryPoint() {
 	this->fIgnoreEntryPointIncrementalLink = true;
+}
+
+void Options::markValidIncrementalUpdate() {
+	this->fValidIncrementeUpdate = true;
 }
 

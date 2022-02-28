@@ -82,7 +82,7 @@ struct GlobalSymbolRefEntry {
 
 /// Incremental patch space
 struct PatchSpace {
-    uint32_t sectionIndex_;
+    char     sectname[16];    /* name of this section */
     uint64_t patchOffset_;
     uint32_t patchSpace_;
 };
@@ -236,8 +236,8 @@ private:
 template <typename P>
 class PatchSpaceSectionEntry {
 public:
-    uint32_t sectionIndex() const INLINE { return E::get32(fields.sectionIndex_); }
-    void setSectionIndex(uint32_t value) INLINE { E::set32(fields.sectionIndex_, value); }
+    const char *sectname() const INLINE { return fields.sectname; }
+    void setSectname(const char* value)    INLINE { strncpy(fields.sectname, value, 16); }
     
     uint64_t patchOffset() const INLINE { return E::get64(fields.patchOffset_); }
     void setPatchOffset(uint64_t value) INLINE { E::set64(fields.patchOffset_, value); }
@@ -332,15 +332,19 @@ private:
 
 class Incremental {
 public:
-    static bool isIncrementalOutputValid(const Options &options);
-    
-    explicit Incremental(Options &options)
-        : _options(options) {}
-    void openIncrementalBinary();
-    void update();
+    explicit Incremental(Options &options) : _options(options), fd_(0), wholeBuffer_(nullptr) {}
+    int fd() const { return fd_; }
+    uint8_t *wholeBuffer() { return wholeBuffer_; }
+    void openBinary();
+    void updateBinary(const ld::Internal &state);
+    void closeBinary();
+    constexpr PatchSpace &patchSpace(const char *sectName) { return patchSpace_[sectName]; }
     
 private:
     Options &_options;
+    int fd_;
+    uint8_t *wholeBuffer_;
+    std::unordered_map<const char *, PatchSpace> patchSpace_;
 };
 
 } // namespace incremental

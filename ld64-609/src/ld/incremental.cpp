@@ -7,6 +7,7 @@
 //
 
 #include <sys/mount.h>
+#include <string.h>
 
 #include "Architectures.hpp"
 #include "incremental.hpp"
@@ -21,47 +22,62 @@ public:
     typedef typename A::P::E E;
     typedef typename A::P::uint_t pint_t;
     using IncrInputMap = std::unordered_map<std::string, InputEntrySection<P> *>;
+    using IncrPatchSpaceMap = std::unordered_map<const char *, PatchSpace>;
     
     static bool validFile(const uint8_t *fileContent);
     
     Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime);
     bool hasValidEntryPoint() const { return entryPoint_ != nullptr; }
     bool canIncrementalUpdate();
-    IncrInputMap &incrInputsMap() {
-        return incrInputsMap_;
-    }
+    IncrInputMap &incrInputsMap() { return incrInputsMap_; }
+    IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
     
 private:
     void checkMachOHeader();
-    void checkIncrementalLoadCommand();
+    bool isStaticExecutable() const;
+    void parseSymbolTable(const macho_load_command<P> *cmd);
+    void parseIndirectSymbolTable();
+    uint32_t indirectSymbol(uint32_t indirectIndex) const;
+    const macho_nlist<P> &symbolFromIndex(uint32_t index);
+    const char *nameFromSymbol(const macho_nlist<P> &sym);
+    bool weakImportFromSymbol(const macho_nlist<P> &sym);
+    void parseIncrementalSections();
     void checkIncrementalSection(const macho_segment_command<P>* segCmd, const macho_section<P>* sect);
     uint8_t loadCommandSizeMask();
     
-    const uint8_t*                              fileContent_;
-    uint32_t                                    fileLength_;
-    const macho_header<P>*                      fHeader_;
-    const macho_entry_point_command<P>*         entryPoint_;
-    const InputEntrySection<P>*                 fIncrementalInputSection_;
-    const GlobalSymbolTableEntry<P>*            fIncrementalSymbolSection_;
-    const PatchSpaceSectionEntry<P>*             fIncrementalPatchSpaceSection_;
-    const char*                                 fIncrementalStrings_;
+    const uint8_t *fileContent_;
+    uint32_t fileLength_;
+    const macho_header<P> *fHeader_;
+    const macho_entry_point_command<P> *entryPoint_;
+    const macho_segment_command<P> *linkEditSegment_;
+    const macho_dysymtab_command<P> *fDynamicSymbolTable_;
+    const macho_nlist<P> *symbolTable_;
+    uint32_t symbolCount_;
+    const InputEntrySection<P> *fIncrementalInputSection_;
+    const GlobalSymbolTableEntry<P> *fIncrementalSymbolSection_;
+    const PatchSpaceSectionEntry<P> *fIncrementalPatchSpaceSection_;
+    const char *stringTable_;
+    const char *stringTableEnd_;
+    const uint32_t *indirectSymbolTable_;
+    uint32_t indirectTableCount_;
+    const char *fIncrementalStrings_;
     bool fSlidableImage_;
     std::vector<InputEntrySection<P> *> incrInputs_;
     std::unordered_map<std::string, InputEntrySection<P> *> incrInputsMap_;
     std::vector<GlobalSymbolTableEntry<P> *> incrSymbols_;
     std::vector<std::string> incrStringPool_;
-    std::unordered_map<uint32_t, PatchSpaceSectionEntry<P> *> incrPatchSpaceMap_;
+    IncrPatchSpaceMap incrPatchSpaceMap_;
 };
 
 template <typename A>
-Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime) : fileContent_(fileContent), fileLength_(fileLength), fHeader_(nullptr), entryPoint_(nullptr), fIncrementalInputSection_(nullptr), fIncrementalSymbolSection_(nullptr), fIncrementalPatchSpaceSection_(nullptr), fIncrementalStrings_(nullptr) {
+Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime) : fileContent_(fileContent), fileLength_(fileLength), fHeader_(nullptr), entryPoint_(nullptr), fDynamicSymbolTable_(nullptr), symbolTable_(nullptr), symbolCount_(0), fIncrementalInputSection_(nullptr), fIncrementalSymbolSection_(nullptr), fIncrementalPatchSpaceSection_(nullptr), stringTable_(nullptr), stringTableEnd_(nullptr), indirectSymbolTable_(nullptr), indirectTableCount_(0), fIncrementalStrings_(nullptr) {
     if (!validFile(fileContent)) {
         throw "not a mach-o file that can be checked";
     }
     fHeader_ = (const macho_header<P>*)fileContent_;
-    
-    checkMachOHeader();
-    checkIncrementalLoadCommand();
+    this->checkMachOHeader();
+    this->parseIncrementalSections();
+    this->parseIndirectSymbolTable();
 }
 
 template <typename A>
@@ -197,13 +213,40 @@ void Parser<A>::checkMachOHeader() {
 }
 
 template <typename A>
-void Parser<A>::checkIncrementalLoadCommand() {
-    const uint8_t* const endOfFile = (uint8_t*)fHeader_ + fileLength_;
-    const uint8_t* const endOfLoadCommands = (uint8_t*)fHeader_ + sizeof(macho_header<P>) + fHeader_->sizeofcmds();
+bool Parser<A>::isStaticExecutable() const {
+    bool isStaticExecutable = false;
     const uint32_t cmd_count = fHeader_->ncmds();
-    const macho_load_command<P>* const cmds = (macho_load_command<P>*)((uint8_t*)fHeader_ + sizeof(macho_header<P>));
-    const macho_load_command<P>* cmd = cmds;
+    const macho_load_command<P> *const cmds = (macho_load_command<P>*)((uint8_t*)fHeader_ + sizeof(macho_header<P>));
+    const macho_load_command<P> *cmd = cmds;
+    if (fHeader_->filetype() == MH_EXECUTE) {
+        isStaticExecutable = true;
+        cmd = cmds;
+        for (uint32_t i = 0; i < cmd_count; ++i) {
+            switch ( cmd->cmd() ) {
+                case LC_LOAD_DYLINKER:
+                    isStaticExecutable = false;
+                    break;
+            }
+            cmd = (const macho_load_command<P>*)(((uint8_t *)cmd) + cmd->cmdsize());
+        }
+        if (isStaticExecutable) {
+            if ((fHeader_->flags() != MH_NOUNDEFS) && (fHeader_->flags() != (MH_NOUNDEFS|MH_PIE))) {
+                throw "invalid bits in mach_header flags for static executable";
+            }
+        }
+    }
+    return isStaticExecutable;
+}
+
+template <typename A>
+void Parser<A>::parseIncrementalSections() {
+    const uint8_t *const endOfFile = (uint8_t*)fHeader_ + fileLength_;
+    const uint8_t *const endOfLoadCommands = (uint8_t*)fHeader_ + sizeof(macho_header<P>) + fHeader_->sizeofcmds();
+    const uint32_t cmd_count = fHeader_->ncmds();
+    const macho_load_command<P> *const cmds = (macho_load_command<P>*)((uint8_t*)fHeader_ + sizeof(macho_header<P>));
+    const macho_load_command<P> *cmd = cmds;
     const IncrementalCommand<P> *incrementalCommand;
+    bool isStaticExecutable = this->isStaticExecutable();
     for (uint32_t i = 0; i < cmd_count; ++i) {
         uint32_t size = cmd->cmdsize();
         if ((size & this->loadCommandSizeMask()) != 0) {
@@ -217,13 +260,33 @@ void Parser<A>::checkIncrementalLoadCommand() {
             throwf("load command #%d extends beyond the end of the file", i);
         }
         switch (cmd->cmd()) {
+            case macho_segment_command<P>::CMD: {
+                const macho_segment_command<P> *segCmd = (const macho_segment_command<P> *)cmd;
+                if (strcmp(segCmd->segname(), "__TEXT") == 0) {
+                    const macho_section<P> *const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
+                    const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
+                    for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd; ++sect) {
+                        fprintf(stderr, "sect name:%s\n", sect->sectname());
+                    }
+                } else if (strcmp(segCmd->segname(), "__LINKEDIT") == 0) {
+                    linkEditSegment_ = segCmd;
+                }
+            } break;
             case LC_MAIN: {
                 if (fHeader_->filetype() != MH_EXECUTE) {
                     throw "LC_MAIN can only be used in MH_EXECUTE file types";
                 }
                 entryPoint_ =  (macho_entry_point_command<P>*)cmd;
-            }
-                break;
+            } break;
+            case LC_SYMTAB: {
+                this->parseSymbolTable(cmd);
+            } break;
+            case LC_DYSYMTAB: {
+                if (isStaticExecutable && !fSlidableImage_) {
+                    throw "LC_DYSYMTAB should not be used in static executable";
+                }
+                fDynamicSymbolTable_ = (const macho_dysymtab_command<P> *)cmd;
+            } break;
             case LC_INCREMENTAL: {
                 incrementalCommand = (IncrementalCommand<P> *)cmd;
                 // incremental string pool
@@ -283,7 +346,11 @@ void Parser<A>::checkIncrementalLoadCommand() {
                 fIncrementalPatchSpaceSection_ = (const PatchSpaceSectionEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off());
                 const PatchSpaceSectionEntry<P> *patchSpaceEnd = (const PatchSpaceSectionEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off() + incrementalCommand->patch_space_size());
                 for (PatchSpaceSectionEntry<P> *p = const_cast<PatchSpaceSectionEntry<P> *>(fIncrementalPatchSpaceSection_); p != patchSpaceEnd; p++) {
-                    incrPatchSpaceMap_[p->sectionIndex()] = p;
+                    PatchSpace patchSpace;
+                    strncpy(patchSpace.sectname, p->sectname(), 16);
+                    patchSpace.patchOffset_ = p->patchOffset();
+                    patchSpace.patchSpace_ = p->patchSpace();
+                    incrPatchSpaceMap_[patchSpace.sectname] = patchSpace;
                 }
             }
                 break;
@@ -292,6 +359,151 @@ void Parser<A>::checkIncrementalLoadCommand() {
         }
         cmd = (const macho_load_command<P>*)endOfCmd;
     }
+}
+
+template <typename A>
+void Parser<A>::parseSymbolTable(const macho_load_command<P> *cmd) {
+    const macho_symtab_command<P> *symtab = (macho_symtab_command<P> *)cmd;
+    symbolCount_ = symtab->nsyms();
+    if (symbolCount_ != 0) {
+        symbolTable_ = (const macho_nlist<P> *)((uint8_t *)fHeader_ + symtab->symoff());
+        if (symtab->symoff() < linkEditSegment_->fileoff()) {
+            throw "symbol table not in __LINKEDIT";
+        }
+        if ((symtab->symoff() + symbolCount_ * sizeof(macho_nlist<P> *)) > symtab->stroff()) {
+            throw "symbol table overlaps string pool";
+        }
+        if ((symtab->symoff() % sizeof(pint_t)) != 0) {
+            throw "symbol table start not pointer aligned";
+        }
+    }
+    stringTable_ = (char *)fHeader_ + symtab->stroff();
+    stringTableEnd_ = stringTable_ + symtab->strsize();
+    if (symtab->stroff() < linkEditSegment_->fileoff()) {
+        throw "string pool not in __LINKEDIT";
+    }
+    if ((symtab->stroff() + symtab->strsize()) > (linkEditSegment_->fileoff() + linkEditSegment_->filesize())) {
+        throw "string pool extends beyond __LINKEDIT";
+    }
+    if ((symtab->stroff() % 4) != 0) {
+        throw "string pool start not pointer aligned";
+    }
+}
+
+template <typename A>
+void Parser<A>::parseIndirectSymbolTable() {
+    const macho_load_command<P> *const cmds = (macho_load_command<P>*)((uint8_t*)fHeader_ + sizeof(macho_header<P>));
+    const uint32_t cmd_count = fHeader_->ncmds();
+    indirectSymbolTable_ = (uint32_t *)((uint8_t *)fHeader_ + fDynamicSymbolTable_->indirectsymoff());
+    indirectTableCount_ = fDynamicSymbolTable_->nindirectsyms();
+    if (indirectTableCount_ != 0) {
+        if (fDynamicSymbolTable_->indirectsymoff() < linkEditSegment_->fileoff()) {
+            throw "indirect symbol table not in __LINKEDIT";
+        }
+        if ((fDynamicSymbolTable_->indirectsymoff() + indirectTableCount_ * 4) > (linkEditSegment_->fileoff() + linkEditSegment_->filesize())) {
+            throw "indirect symbol table not in __LINKEDIT";
+        }
+        if ((fDynamicSymbolTable_->indirectsymoff() % sizeof(pint_t)) != 0 ) {
+            throw "indirect symbol table not pointer aligned";
+        }
+        
+        for (uint32_t i = 0; i < indirectTableCount_; ++i) {
+            uint32_t symIndex = indirectSymbol(i);
+            if (symIndex == INDIRECT_SYMBOL_LOCAL) {
+                // use direct reference for local symbols
+//                const pint_t* nlpContent = (pint_t*)(this->file().fileContent() + sect->offset() + addr - sect->addr());
+//                pint_t targetAddr = P::getP(*nlpContent);
+//                target.atom = parser.findAtomByAddress(targetAddr);
+//                target.weakImport = false;
+//                target.addend = (targetAddr - target.atom->objectAddress());
+//                // <rdar://problem/8385011> if pointer to thumb function, mask of thumb bit (not an addend of +1)
+//                if ( target.atom->isThumb() )
+//                    target.addend &= (-2);
+//                assert(src.atom->combine() == ld::Atom::combineNever);
+            }
+            else {
+                const macho_nlist<P> &sym = this->symbolFromIndex(symIndex);
+                // use direct reference for local symbols
+                if ( ((sym.n_type() & N_TYPE) == N_SECT) && ((sym.n_type() & N_EXT) == 0) ) {
+//                    parser.findTargetFromAddressAndSectionNum(sym.n_value(), sym.n_sect(), target);
+                    
+                }
+                else {
+                    
+//                    target.name = this->nameFromSymbol(sym);
+//                    target.weakImport = this->weakImportFromSymbol(sym);
+                    
+                }
+            }
+        }
+        
+        const macho_load_command<P> *cmd = cmds;
+        for (uint32_t i = 0; i < cmd_count; ++i) {
+            if (cmd->cmd() == macho_segment_command<P>::CMD) {
+                const macho_segment_command<P> *segCmd = (const macho_segment_command<P>*)cmd;
+                const macho_section<P> *const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
+                const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
+                for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd; ++sect) {
+                    // make sure all magic sections that use indirect symbol table fit within it
+                    uint32_t start = 0;
+                    uint32_t elementSize = 0;
+                    switch (sect->flags() & SECTION_TYPE) {
+                        case S_SYMBOL_STUBS:
+                            elementSize = sect->reserved2();
+                            start = sect->reserved1();
+                            break;
+                        case S_LAZY_SYMBOL_POINTERS:
+                        case S_NON_LAZY_SYMBOL_POINTERS:
+                            elementSize = sizeof(pint_t);
+                            start = sect->reserved1();
+                            break;
+                    }
+                    if (elementSize != 0) {
+                        uint32_t count = sect->size() / elementSize;
+//                        if ((count * elementSize) != sect->size()) {
+//                            throwf("%s section size is not an even multiple of element size", sect->sectname());
+//                        }
+//                        if ((start + count) > indirectTableCount_) {
+//                            throwf("%s section references beyond end of indirect symbol table (%d > %d)", sect->sectname(), start+count, indirectTableCount_);
+//                        }
+                        
+//                        uint64_t indirectAddress = sect->addr() + (nindsym - sect->reserved1()) * elementSize;
+                    }
+                }
+            }
+            cmd = (const macho_load_command<P>*)(((uint8_t *)cmd) + cmd->cmdsize());
+        }
+    }
+}
+
+template <typename A>
+uint32_t Parser<A>::indirectSymbol(uint32_t indirectIndex) const {
+    if (indirectIndex >= indirectTableCount_) {
+       throw "indirect symbol index out of range";
+    }
+    return E::get32(indirectSymbolTable_[indirectIndex]);
+}
+
+template <typename A>
+const macho_nlist<typename A::P>& Parser<A>::symbolFromIndex(uint32_t index) {
+    if (index > symbolCount_) {
+        throw "symbol index out of range";
+    }
+    return symbolTable_[index];
+}
+    
+template <typename A>
+const char *Parser<A>::nameFromSymbol(const macho_nlist<P> &sym) {
+    uint32_t strOffset = sym.n_strx();
+    if (strOffset >= (stringTableEnd_ - stringTable_)) {
+        throw "malformed nlist string offset";
+    }
+    return &stringTable_[strOffset];
+}
+
+template <typename A>
+bool Parser<A>::weakImportFromSymbol(const macho_nlist<P> &sym) {
+    return ( ((sym.n_type() & N_TYPE) == N_UNDF) && ((sym.n_desc() & N_WEAK_REF) != 0) );
 }
 
 template <typename A>
@@ -313,17 +525,11 @@ static void removePathAndExit(int sig) {
     _exit(1);
 }
 
-bool Incremental::isIncrementalOutputValid(const Options &options) {
-    return access(options.outputFilePath(), F_OK) == 0;
-}
-
-void Incremental::openIncrementalBinary() {
+void Incremental::openBinary() {
     if (access(_options.outputFilePath(), F_OK) != 0) {
         return;
     }
-    if ((access(_options.outputFilePath(), F_OK) != 0) &&
-        (access(_options.outputFilePath(), W_OK) == -1) &&
-        (access(_options.outputFilePath(), R_OK) == -1)) {
+    if ((access(_options.outputFilePath(), W_OK) == -1) && (access(_options.outputFilePath(), R_OK) == -1)) {
         throwf("can't read/write output file: %s", _options.outputFilePath());
     }
 
@@ -374,34 +580,16 @@ void Incremental::openIncrementalBinary() {
         }
     }
 
-    int fd;
-    uint8_t *wholeBuffer;
     if (outputIsRegularFile && outputIsMappableFile) {
         // <rdar://problem/20959031> ld64 should clean up temporary files on SIGINT
         ::signal(SIGINT, removePathAndExit);
-        fd = open(_options.outputFilePath(), O_RDWR | O_CREAT, permissions);
-        if (fd == -1) {
+        fd_ = open(_options.outputFilePath(), O_RDWR | O_CREAT, permissions);
+        if (fd_ == -1) {
             throwf("can't open output file for incremetal update '%s', errno=%d", _options.outputFilePath(), errno);
         }
-        wholeBuffer = (uint8_t *)::mmap(NULL, stat_buf.st_size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
-        if (wholeBuffer == MAP_FAILED) {
+        wholeBuffer_ = (uint8_t *)::mmap(NULL, stat_buf.st_size, PROT_WRITE | PROT_READ, MAP_SHARED, fd_, 0);
+        if (wholeBuffer_ == MAP_FAILED) {
             throwf("can't create buffer of %llu bytes for output", stat_buf.st_size);
-        }
-    } else {
-        if (outputIsRegularFile) {
-            fd = open(_options.outputFilePath(), O_RDWR | O_CREAT, permissions);
-        } else {
-            fd = open(_options.outputFilePath(), O_WRONLY);
-        }
-        if (fd == -1)
-            throwf("can't open output file for writing: %s, errno=%d", _options.outputFilePath(), errno);
-        // try to allocate buffer for entire output file content
-        wholeBuffer = (uint8_t *)calloc(stat_buf.st_size, 1);
-        if (wholeBuffer == NULL) {
-            throwf("can't create buffer of %llu bytes for output", stat_buf.st_size);
-        }
-        if (read(fd, wholeBuffer, stat_buf.st_size) != stat_buf.st_size) {
-            throwf("can't read incremental file");
         }
     }
 
@@ -409,25 +597,25 @@ void Incremental::openIncrementalBinary() {
     switch (_options.architecture()) {
 #if SUPPORT_ARCH_x86_64
         case CPU_TYPE_X86_64: {
-            Parser<x86_64> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+            Parser<x86_64> parser(wholeBuffer_, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
         }
             break;
 #endif
 #if SUPPORT_ARCH_i386
         case CPU_TYPE_I386: {
-            Parser<x86> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+            Parser<x86> parser(wholeBuffer_, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
         }
             break;
 #endif
 #if SUPPORT_ARCH_arm_any
         case CPU_TYPE_ARM: {
-            Parser<arm> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+            Parser<arm> parser(wholeBuffer_, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
         }
             break;
 #endif
 #if SUPPORT_ARCH_arm64
         case CPU_TYPE_ARM64: {
-            Parser<arm64> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+            Parser<arm64> parser(wholeBuffer_, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
             if (parser.hasValidEntryPoint()) {
                 _options.markIgnoreEntryPoint();
             }
@@ -449,16 +637,19 @@ void Incremental::openIncrementalBinary() {
                 incrementalFiles.insert((*it).path);
             }
             _options.removeIncrementalInputFiles(incrementalFiles);
+            patchSpace_ = std::move(parser.patchSpaceMap());
         }
             break;
 #endif
 #if SUPPORT_ARCH_arm64_32
         case CPU_TYPE_ARM64_32: {
-                Parser<arm64_32> parser(wholeBuffer, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
+                Parser<arm64_32> parser(wholeBuffer_, stat_buf.st_size, _options.outputFilePath(), stat_buf.st_mtime);
         }
             break;
 #endif
     }
+    
+    _options.markValidIncrementalUpdate();
     //    if ( _options.UUIDMode() == Options::kUUIDRandom ) {
     //        uint8_t bits[16];
     //        ::uuid_generate_random(bits);
@@ -472,23 +663,29 @@ void Incremental::openIncrementalBinary() {
     // now that file output buffer is complete, if codesigned, compute each page's hash
     //    if ( _hasCodeSignature )
     //        _codeSignatureAtom->hash(wholeBuffer);
+}
 
-    if (outputIsRegularFile && outputIsMappableFile) {
-        ::close(fd);
-    } else {
-        if (::write(fd, wholeBuffer, stat_buf.st_size) == -1) {
-            throwf("can't write to output file: %s, errno=%d", _options.outputFilePath(), errno);
+void Incremental::updateBinary(const ld::Internal &state) {
+    assert(wholeBuffer_ != nullptr);
+    for (auto sit = state.sections.begin(); sit != state.sections.end(); sit++) {
+        ld::Internal::FinalSection *sect = *sit;
+        if (sect->isSectionHidden()) {
+            continue;
         }
-        sDescriptorOfPathToRemove = -1;
-        ::close(fd);
-        // <rdar://problem/13118223> NFS: iOS incremental builds in Xcode 4.6 fail with codesign error
-        // NFS seems to pad the end of the file sometimes.  Calling trunc seems to correct it...
-        ::truncate(_options.outputFilePath(), stat_buf.st_size);
+        if (strncmp(sect->sectionName(), "__text", 6) != 0 && strncmp(sect->sectionName(), "__data", 6) != 0) {
+            continue;
+        }
+        for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
+            const ld::Atom *atom = *ait;
+            if (atom->file()) {
+                fprintf(stderr, "atom name:%s, filepath:%s\n", atom->name(), atom->file()->path());
+            }
+        }
     }
 }
 
-void Incremental::update() {
-    
+void Incremental::closeBinary() {
+    ::close(fd_);
 }
 
 } // namespace incremental
