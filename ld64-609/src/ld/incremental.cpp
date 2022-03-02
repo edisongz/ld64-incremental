@@ -15,6 +15,50 @@
 namespace ld {
 namespace incremental {
 
+//
+// An StubAtom has no content.  It exists so that the linker can track which
+// imported symbols came from which dynamic libraries.
+//
+class StubAtom final : public ld::Atom
+{
+public:
+    StubAtom(const char *nm, const char *im, uint32_t cv, bool weakDef, bool tlv, uint64_t address)
+        : ld::Atom(_s_section, ld::Atom::definitionProxy,
+                   (weakDef ? ld::Atom::combineByName : ld::Atom::combineNever),
+                   ld::Atom::scopeLinkageUnit,
+                   (tlv ? ld::Atom::typeTLV : ld::Atom::typeUnclassified),
+                   symbolTableNotIn, false, false, false, ld::Atom::Alignment(0)),
+          _name(nm),
+          _installname(im),
+          _address(address),
+          _compatVersion(cv)
+    {}
+    virtual                 ~StubAtom() {}
+    
+    // overrides of ld::Atom
+    virtual const ld::File*    file() const override final { return nullptr; }
+    virtual const char*        name() const override final { return _name; }
+    virtual uint64_t        size() const override final { return 0; }
+    virtual uint64_t        objectAddress() const override final { return _address; }
+    virtual void            copyRawContent(uint8_t buffer[]) const override final { }
+
+    virtual void            setScope(Scope) { }
+    virtual void            setFile(const ld::File* file) override {};
+    const char *            installname() const { return _installname; }
+    uint32_t                compat_version() const { return _compatVersion; }
+private:
+
+//    const File*                _file;
+    const char*             _name;
+    const char*             _installname;
+    uint64_t                _address;
+    uint32_t                _compatVersion;
+    
+    static ld::Section      _s_section;
+};
+
+ld::Section StubAtom::_s_section("__TEXT", "__import", ld::Section::typeImportProxies, true);
+
 template <typename A>
 class Parser {
 public:
@@ -22,7 +66,7 @@ public:
     typedef typename A::P::E E;
     typedef typename A::P::uint_t pint_t;
     using IncrInputMap = std::unordered_map<std::string, InputEntrySection<P> *>;
-    using IncrPatchSpaceMap = std::unordered_map<const char *, PatchSpace>;
+    using IncrPatchSpaceMap = std::unordered_map<std::string, PatchSpace>;
     
     static bool validFile(const uint8_t *fileContent);
     
@@ -31,6 +75,8 @@ public:
     bool canIncrementalUpdate();
     IncrInputMap &incrInputsMap() { return incrInputsMap_; }
     IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
+    constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
+    constexpr std::unordered_map<std::string, uint64_t> &sectionStartAddressMap() { return sectionStartAddressMap_; }
     
 private:
     void checkMachOHeader();
@@ -67,6 +113,8 @@ private:
     std::vector<GlobalSymbolTableEntry<P> *> incrSymbols_;
     std::vector<std::string> incrStringPool_;
     IncrPatchSpaceMap incrPatchSpaceMap_;
+    std::vector<const ld::Atom *> stubAtoms_;
+    std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
 };
 
 template <typename A>
@@ -262,13 +310,7 @@ void Parser<A>::parseIncrementalSections() {
         switch (cmd->cmd()) {
             case macho_segment_command<P>::CMD: {
                 const macho_segment_command<P> *segCmd = (const macho_segment_command<P> *)cmd;
-                if (strcmp(segCmd->segname(), "__TEXT") == 0) {
-                    const macho_section<P> *const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
-                    const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
-                    for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd; ++sect) {
-                        fprintf(stderr, "sect name:%s\n", sect->sectname());
-                    }
-                } else if (strcmp(segCmd->segname(), "__LINKEDIT") == 0) {
+                if (strcmp(segCmd->segname(), "__LINKEDIT") == 0) {
                     linkEditSegment_ = segCmd;
                 }
             } break;
@@ -276,7 +318,7 @@ void Parser<A>::parseIncrementalSections() {
                 if (fHeader_->filetype() != MH_EXECUTE) {
                     throw "LC_MAIN can only be used in MH_EXECUTE file types";
                 }
-                entryPoint_ =  (macho_entry_point_command<P>*)cmd;
+                entryPoint_ =  (macho_entry_point_command<P> *)cmd;
             } break;
             case LC_SYMTAB: {
                 this->parseSymbolTable(cmd);
@@ -345,7 +387,7 @@ void Parser<A>::parseIncrementalSections() {
                 // patch space
                 fIncrementalPatchSpaceSection_ = (const PatchSpaceSectionEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off());
                 const PatchSpaceSectionEntry<P> *patchSpaceEnd = (const PatchSpaceSectionEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off() + incrementalCommand->patch_space_size());
-                for (PatchSpaceSectionEntry<P> *p = const_cast<PatchSpaceSectionEntry<P> *>(fIncrementalPatchSpaceSection_); p != patchSpaceEnd; p++) {
+                for (PatchSpaceSectionEntry<P> *p = const_cast<PatchSpaceSectionEntry<P> *>(fIncrementalPatchSpaceSection_); p < patchSpaceEnd; p++) {
                     PatchSpace patchSpace;
                     strncpy(patchSpace.sectname, p->sectname(), 16);
                     patchSpace.patchOffset_ = p->patchOffset();
@@ -407,40 +449,10 @@ void Parser<A>::parseIndirectSymbolTable() {
             throw "indirect symbol table not pointer aligned";
         }
         
-        for (uint32_t i = 0; i < indirectTableCount_; ++i) {
-            uint32_t symIndex = indirectSymbol(i);
-            if (symIndex == INDIRECT_SYMBOL_LOCAL) {
-                // use direct reference for local symbols
-//                const pint_t* nlpContent = (pint_t*)(this->file().fileContent() + sect->offset() + addr - sect->addr());
-//                pint_t targetAddr = P::getP(*nlpContent);
-//                target.atom = parser.findAtomByAddress(targetAddr);
-//                target.weakImport = false;
-//                target.addend = (targetAddr - target.atom->objectAddress());
-//                // <rdar://problem/8385011> if pointer to thumb function, mask of thumb bit (not an addend of +1)
-//                if ( target.atom->isThumb() )
-//                    target.addend &= (-2);
-//                assert(src.atom->combine() == ld::Atom::combineNever);
-            }
-            else {
-                const macho_nlist<P> &sym = this->symbolFromIndex(symIndex);
-                // use direct reference for local symbols
-                if ( ((sym.n_type() & N_TYPE) == N_SECT) && ((sym.n_type() & N_EXT) == 0) ) {
-//                    parser.findTargetFromAddressAndSectionNum(sym.n_value(), sym.n_sect(), target);
-                    
-                }
-                else {
-                    
-//                    target.name = this->nameFromSymbol(sym);
-//                    target.weakImport = this->weakImportFromSymbol(sym);
-                    
-                }
-            }
-        }
-        
         const macho_load_command<P> *cmd = cmds;
         for (uint32_t i = 0; i < cmd_count; ++i) {
             if (cmd->cmd() == macho_segment_command<P>::CMD) {
-                const macho_segment_command<P> *segCmd = (const macho_segment_command<P>*)cmd;
+                const macho_segment_command<P> *segCmd = (const macho_segment_command<P> *)cmd;
                 const macho_section<P> *const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
                 const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
                 for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd; ++sect) {
@@ -452,23 +464,27 @@ void Parser<A>::parseIndirectSymbolTable() {
                             elementSize = sect->reserved2();
                             start = sect->reserved1();
                             break;
-                        case S_LAZY_SYMBOL_POINTERS:
+//                        case S_LAZY_SYMBOL_POINTERS:
                         case S_NON_LAZY_SYMBOL_POINTERS:
                             elementSize = sizeof(pint_t);
                             start = sect->reserved1();
                             break;
                     }
                     if (elementSize != 0) {
-                        uint32_t count = sect->size() / elementSize;
-//                        if ((count * elementSize) != sect->size()) {
-//                            throwf("%s section size is not an even multiple of element size", sect->sectname());
-//                        }
-//                        if ((start + count) > indirectTableCount_) {
-//                            throwf("%s section references beyond end of indirect symbol table (%d > %d)", sect->sectname(), start+count, indirectTableCount_);
-//                        }
-                        
-//                        uint64_t indirectAddress = sect->addr() + (nindsym - sect->reserved1()) * elementSize;
+                        auto patch = incrPatchSpaceMap_[sect->sectname()];
+                        uint32_t count = (sect->size() - patch.patchSpace_) / elementSize;
+                        for (uint32_t index = 0; index < count; ++index) {
+                            uint32_t symIndex = this->indirectSymbol(start + index);
+                            if (symIndex != INDIRECT_SYMBOL_LOCAL) {
+                                const macho_nlist<P> &sym = this->symbolFromIndex(symIndex);
+                                pint_t address = sect->addr() + index * sizeof(pint_t);
+//                                const char *fromDylib = classicOrdinalName(GET_LIBRARY_ORDINAL(sym->n_desc()));
+                                fprintf(stderr, "sect:%s, stub symbol:%s, %llu\n", sect->sectname(), this->nameFromSymbol(sym), (uint64_t)address);
+                                stubAtoms_.push_back(new ld::incremental::StubAtom(this->nameFromSymbol(sym), "", 1, this->weakImportFromSymbol(sym), false, (uint64_t)address));
+                            }
+                        }
                     }
+                    sectionStartAddressMap_[sect->sectname()] = sect->addr();
                 }
             }
             cmd = (const macho_load_command<P>*)(((uint8_t *)cmd) + cmd->cmdsize());
@@ -503,7 +519,7 @@ const char *Parser<A>::nameFromSymbol(const macho_nlist<P> &sym) {
 
 template <typename A>
 bool Parser<A>::weakImportFromSymbol(const macho_nlist<P> &sym) {
-    return ( ((sym.n_type() & N_TYPE) == N_UNDF) && ((sym.n_desc() & N_WEAK_REF) != 0) );
+    return (((sym.n_type() & N_TYPE) == N_UNDF) && ((sym.n_desc() & N_WEAK_REF) != 0));
 }
 
 template <typename A>
@@ -638,6 +654,8 @@ void Incremental::openBinary() {
             }
             _options.removeIncrementalInputFiles(incrementalFiles);
             patchSpace_ = std::move(parser.patchSpaceMap());
+            stubAtoms_ = parser.stubAtoms();
+            sectionStartAddressMap_ = parser.sectionStartAddressMap();
         }
             break;
 #endif
@@ -648,44 +666,23 @@ void Incremental::openBinary() {
             break;
 #endif
     }
-    
     _options.markValidIncrementalUpdate();
-    //    if ( _options.UUIDMode() == Options::kUUIDRandom ) {
-    //        uint8_t bits[16];
-    //        ::uuid_generate_random(bits);
-    //        _headersAndLoadCommandAtom->setUUID(bits);
-    //    }
-
-    // compute UUID
-    //    if ( _options.UUIDMode() == Options::kUUIDContent )
-    //        computeContentUUID(state, wholeBuffer);
-
-    // now that file output buffer is complete, if codesigned, compute each page's hash
-    //    if ( _hasCodeSignature )
-    //        _codeSignatureAtom->hash(wholeBuffer);
-}
-
-void Incremental::updateBinary(const ld::Internal &state) {
-    assert(wholeBuffer_ != nullptr);
-    for (auto sit = state.sections.begin(); sit != state.sections.end(); sit++) {
-        ld::Internal::FinalSection *sect = *sit;
-        if (sect->isSectionHidden()) {
-            continue;
-        }
-        if (strncmp(sect->sectionName(), "__text", 6) != 0 && strncmp(sect->sectionName(), "__data", 6) != 0) {
-            continue;
-        }
-        for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
-            const ld::Atom *atom = *ait;
-            if (atom->file()) {
-                fprintf(stderr, "atom name:%s, filepath:%s\n", atom->name(), atom->file()->path());
-            }
-        }
-    }
 }
 
 void Incremental::closeBinary() {
     ::close(fd_);
+}
+
+void Incremental::forEachStubAtom(ld::File::AtomHandler &handler, ld::Internal &state) {
+    for (auto ait = stubAtoms_.begin(); ait != stubAtoms_.end(); ++ait) {
+        handler.doAtom(*(*ait));
+    }
+}
+
+void Incremental::forEachStubAtom(const std::function<void (const ld::Atom *)> &handler) {
+    for (auto ait = stubAtoms_.begin(); ait != stubAtoms_.end(); ++ait) {
+        handler(*ait);
+    }
 }
 
 } // namespace incremental

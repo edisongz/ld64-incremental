@@ -37,8 +37,6 @@
 
 #include "InputFiles.h"
 #include "Options.h"
-#include "Resolver.h"
-#include "SymbolTable.h"
 #include "ld.hpp"
 
 #include "configure.h"
@@ -332,19 +330,22 @@ private:
 
 class Incremental {
 public:
-    explicit Incremental(Options &options) : _options(options), fd_(0), wholeBuffer_(nullptr) {}
-    int fd() const { return fd_; }
+    explicit Incremental(Options &options) : _options(options), wholeBuffer_(nullptr) {}
     uint8_t *wholeBuffer() { return wholeBuffer_; }
     void openBinary();
-    void updateBinary(const ld::Internal &state);
     void closeBinary();
     constexpr PatchSpace &patchSpace(const char *sectName) { return patchSpace_[sectName]; }
+    void forEachStubAtom(ld::File::AtomHandler& handler, ld::Internal& state);
+    void forEachStubAtom(const std::function<void(const ld::Atom *)> &handler);
+    constexpr uint64_t sectionStartAddress(const char *sectName) { return sectionStartAddressMap_[sectName]; }
     
 private:
     Options &_options;
     int fd_;
     uint8_t *wholeBuffer_;
-    std::unordered_map<const char *, PatchSpace> patchSpace_;
+    std::unordered_map<std::string, PatchSpace> patchSpace_;
+    std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
+    std::vector<const ld::Atom *> stubAtoms_;
 };
 
 } // namespace incremental

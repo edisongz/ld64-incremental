@@ -163,6 +163,8 @@ void OutputFile::dumpAtomsBySection(ld::Internal& state, bool printAtoms)
 void OutputFile::write(ld::Internal& state)
 {
 	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+		state.setSectionSizesAndAlignments();
+		this->assignIncrementalAtomAddresses(state);
 		this->writeOutputFileIncremental(state);
 		return;
 	}
@@ -237,6 +239,35 @@ void OutputFile::assignAtomAddresses(ld::Internal& state)
 					break;
 				default:
 					(const_cast<ld::Atom*>(atom))->setSectionStartAddress(sect->address);
+					if ( log ) fprintf(stderr, "    atom=%p, addr=0x%08llX, name=%s\n", atom, atom->finalAddress(), atom->name());
+					break;
+			}
+		}
+	}
+}
+
+void OutputFile::assignIncrementalAtomAddresses(ld::Internal &state) {
+	const bool log = false;
+	if ( log ) fprintf(stderr, "assignAtomAddresses()\n");
+	for (auto sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
+		ld::Internal::FinalSection* sect = *sit;
+		if ( log ) fprintf(stderr, "  section=%s/%s\n", sect->segmentName(), sect->sectionName());
+		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+			const ld::Atom* atom = *ait;
+			switch ( sect-> type() ) {
+				case ld::Section::typeImportProxies:
+					// want finalAddress() of all proxy atoms to be zero
+					(const_cast<ld::Atom*>(atom))->setSectionStartAddress(0);
+					break;
+				case ld::Section::typeAbsoluteSymbols:
+					// want finalAddress() of all absolute atoms to be value of abs symbol
+					(const_cast<ld::Atom*>(atom))->setSectionStartAddress(0);
+					break;
+				case ld::Section::typeLinkEdit:
+					// linkedit layout is assigned later
+					break;
+				default:
+					(const_cast<ld::Atom*>(atom))->setSectionStartAddress(_incremental.sectionStartAddress(sect->sectionName()));
 					if ( log ) fprintf(stderr, "    atom=%p, addr=0x%08llX, name=%s\n", atom, atom->finalAddress(), atom->name());
 					break;
 			}
@@ -3588,9 +3619,7 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 	uint64_t fileOffsetOfEndOfLastAtom = 0;
 	bool lastAtomUsesNoOps = false;
 	uint64_t baseAddress = _options.baseAddress();
-	uint32_t sectionIndex = 0;
 	for (auto sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
-		sectionIndex++;
 		ld::Internal::FinalSection *sect = *sit;
 		if ((sect->type() == ld::Section::typeMachHeader) && (_options.outputKind() != Options::kPreload)) {
 			baseAddress = sect->address;
@@ -3599,6 +3628,9 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 			continue;
 		}
 		if (takesNoDiskSpace(sect)) {
+			continue;
+		}
+		if (strcmp(sect->sectionName(), "__text") != 0) {
 			continue;
 		}
 		const bool sectionUsesNops = (sect->type() == ld::Section::typeCode);
@@ -3621,7 +3653,6 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 				if (atom->size() > patchSpace.patchSpace_) {
 					continue;
 				}
-//				atom->setSectionStartAddress(<#uint64_t a#>);
 				// check for alignment padding between atoms
 				if ((patchFileOffset != fileOffsetOfEndOfLastAtom) && lastAtomUsesNoOps ) {
 					this->copyNoOps(&wholeBuffer[fileOffsetOfEndOfLastAtom], &wholeBuffer[patchFileOffset], lastAtomWasThumb);
@@ -3629,10 +3660,11 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 				// copy atom content
 				atom->copyRawContent(&wholeBuffer[patchFileOffset]);
 				// apply fix ups
-//				this->applyFixUps(state, baseAddress, atom, &wholeBuffer[patchFileOffset]);
+				this->applyFixUps(state, baseAddress, atom, &wholeBuffer[patchFileOffset]);
 				fileOffsetOfEndOfLastAtom = patchFileOffset + atom->size();
 				lastAtomUsesNoOps = sectionUsesNops;
 				lastAtomWasThumb = atom->isThumb();
+				fprintf(stderr, "incremental section:%s, atom:%s\n", sect->sectionName(), atom->name());
 			} catch (const char* msg) {
 				throwf("%s in '%s' from %s", msg, atom->name(), atom->safeFilePath());
 			}
@@ -4008,7 +4040,6 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 }
 
 void OutputFile::writeOutputFileIncremental(ld::Internal &state) {
-//	int fd = _incremental.fd();
 	uint8_t *wholeBuffer = _incremental.wholeBuffer();
 	writeAtomsIncremental(state, wholeBuffer);
 	_incremental.closeBinary();

@@ -48,7 +48,7 @@ namespace stubs {
 class Pass {
 public:
 								Pass(const Options& opts);
-	void						process(ld::Internal& internal);
+	void						process(ld::Internal& internal, ld::incremental::Incremental &incremental);
 	void						addAtom(const ld::Atom& atom)	{ _internal->addAtom(atom); }
 	bool						usingCompressedLINKEDIT() const { return _compressedLINKEDIT; }
 	ld::Internal*				internal() { return _internal; }
@@ -99,8 +99,8 @@ private:
 #include "stub_arm64_32.hpp"
 #endif
 
-Pass::Pass(const Options& opts) 
-	:	compressedHelperHelper(NULL), 
+Pass::Pass(const Options& opts)
+	:	compressedHelperHelper(NULL),
 		compressedImageCache(NULL),
 		compressedFastBinderPointer(NULL),
 		usingDataConstSegment(opts.useDataConstSegment()),
@@ -303,7 +303,7 @@ void Pass::verifyNoResolverFunctions(ld::Internal& state)
 	}
 }
 
-void Pass::process(ld::Internal& state)
+void Pass::process(ld::Internal& state, ld::incremental::Incremental &incremental)
 {
 	switch ( _options.outputKind() ) {
 		case Options::kObjectFile:
@@ -435,9 +435,16 @@ void Pass::process(ld::Internal& state)
         }
     }
 	
-	// make stub atoms 
-	for (std::map<const ld::Atom*,ld::Atom*>::iterator it = stubFor.begin(); it != stubFor.end(); ++it) {
-		it->second = makeStub(*it->first, weakImportMap[it->first]);
+	if (_options.validIncrementalUpdate()) {
+		// make incremental stub atoms
+		incremental.forEachStubAtom([&](const ld::Atom *atom) {
+			stubFor[atom] = makeStub(*atom, weakImportMap[atom]);
+		});
+	} else {
+		// make stub atoms
+		for (std::map<const ld::Atom*,ld::Atom*>::iterator it = stubFor.begin(); it != stubFor.end(); ++it) {
+			it->second = makeStub(*it->first, weakImportMap[it->first]);
+		}
 	}
 	
 	// updated atoms to use stubs
@@ -480,10 +487,10 @@ void Pass::process(ld::Internal& state)
 }
 
 
-void doPass(const Options& opts, ld::Internal& internal)
+void doPass(const Options& opts, ld::Internal& internal, ld::incremental::Incremental &incremental)
 {
 	Pass  pass(opts);
-	pass.process(internal);
+	pass.process(internal, incremental);
 }
 
 

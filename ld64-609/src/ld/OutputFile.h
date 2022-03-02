@@ -231,6 +231,7 @@ private:
 	uint64_t					pageAlign(uint64_t addr, uint64_t pageSize);
 	void						setLoadCommandsPadding(ld::Internal& state);
 	void						assignAtomAddresses(ld::Internal& state);
+	void						assignIncrementalAtomAddresses(ld::Internal& state);
 	void						addRebaseInfo(const ld::Atom* atom, const ld::Fixup* fixup, const ld::Atom* target);
 	void						makeRebasingInfo(ld::Internal& state);
 	void						makeBindingInfo(ld::Internal& state);

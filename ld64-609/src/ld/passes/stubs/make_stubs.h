@@ -25,13 +25,14 @@
 
 #include "Options.h"
 #include "ld.hpp"
+#include "incremental.hpp"
 
 namespace ld {
 namespace passes {
 namespace stubs {
 
 // called by linker to process atoms in Internal and add stubs as needed
-extern void doPass(const Options& opts, ld::Internal& internal);
+extern void doPass(const Options& opts, ld::Internal& internal, ld::incremental::Incremental &incremental);
 
 } // namespace stubs 
 } // namespace passes 

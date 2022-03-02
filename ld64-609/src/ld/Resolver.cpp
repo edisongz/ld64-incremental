@@ -57,7 +57,6 @@
 #include "SymbolTable.h"
 #include "Resolver.h"
 #include "parsers/lto_file.h"
-#include "incremental.hpp"
 
 #include "configure.h"
 
@@ -312,6 +311,7 @@ void Resolver::buildAtomList()
 {
 	// each input files contributes initial atoms
 	_atoms.reserve(1024);
+	_incremental.forEachStubAtom(*this, _internal);
 	_inputFiles.forEachInitialAtom(*this, _internal);
     
 	_completedInitialObjectFiles = true;

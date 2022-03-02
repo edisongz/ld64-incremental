@@ -1196,7 +1196,7 @@ uint32_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection& 
 		if (sect.isSectionHidden()) {
 			return 0;
 		}
-		if (strcmp(sect.segmentName(), "__TEXT") == 0 || strcmp(sect.segmentName(), "__DATA") == 0 || strcmp(sect.segmentName(), "__DATA_CONST") == 0) {
+		if (strcmp(sect.segmentName(), "__TEXT") == 0 || strcmp(sect.segmentName(), "__DATA") == 0) {
 			uint64_t alignment = 1 << maxAlignment;
 			uint32_t incrementalPatchSpace = (static_cast<uint64_t>(offset * 0.1) + (alignment - 1)) & (-alignment);
 			fprintf(stderr, "incremental segment:%s, section:%s, incremental padding space:%u\n", sect.segmentName(), sect.sectionName(), incrementalPatchSpace);
@@ -1536,7 +1536,7 @@ int main(int argc, const char* argv[])
 		
 		// load and resolve all references
 		statistics.startResolver = mach_absolute_time();
-		ld::tool::Resolver resolver(options, inputFiles, state);
+		ld::tool::Resolver resolver(options, inputFiles, state, incrementalContext);
 		resolver.resolve();
         
 		// add dylibs used
@@ -1549,7 +1549,7 @@ int main(int argc, const char* argv[])
 		// run passes
 		statistics.startPasses = mach_absolute_time();
 		ld::passes::objc::doPass(options, state);
-		ld::passes::stubs::doPass(options, state);
+		ld::passes::stubs::doPass(options, state, incrementalContext);
 		ld::passes::inits::doPass(options, state);
 		ld::passes::huge::doPass(options, state);
 		ld::passes::got::doPass(options, state);

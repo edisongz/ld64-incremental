@@ -47,7 +47,7 @@
 #include "Options.h"
 #include "ld.hpp"
 #include "SymbolTable.h"
-
+#include "incremental.hpp"
 
 namespace ld {
 namespace tool {
@@ -58,8 +58,8 @@ namespace tool {
 class Resolver : public ld::File::AtomHandler
 {
 public:
-							Resolver(const Options& opts, InputFiles& inputs, ld::Internal& state) 
-								: _options(opts), _inputFiles(inputs), _internal(state), 
+							Resolver(const Options& opts, InputFiles& inputs, ld::Internal& state, ld::incremental::Incremental &incremental)
+								: _options(opts), _inputFiles(inputs), _internal(state), _incremental(incremental),
 								  _symbolTable(opts, state.indirectBindingTable),
 								  _haveLLVMObjs(false),
 								  _completedInitialObjectFiles(false),
@@ -126,6 +126,7 @@ private:
 	const Options&					_options;
 	InputFiles&						_inputFiles;
 	ld::Internal&					_internal;
+	ld::incremental::Incremental&   _incremental;
 	std::vector<const ld::Atom*>	_atoms;
 	std::set<const ld::Atom*>		_deadStripRoots;
 	std::vector<const ld::Atom*>	_dontDeadStripIfReferencesLive;
