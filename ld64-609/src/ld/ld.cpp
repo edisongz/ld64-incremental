@@ -1196,10 +1196,20 @@ uint32_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection& 
 		if (sect.isSectionHidden()) {
 			return 0;
 		}
+		if (strcmp(sect.sectionName(), "__objc_selrefs") == 0) {
+			return 0;
+		}
 		if (strcmp(sect.segmentName(), "__TEXT") == 0 || strcmp(sect.segmentName(), "__DATA") == 0) {
 			uint64_t alignment = 1 << maxAlignment;
-			uint32_t incrementalPatchSpace = (static_cast<uint64_t>(offset * 0.1) + (alignment - 1)) & (-alignment);
-			fprintf(stderr, "incremental segment:%s, section:%s, incremental padding space:%u\n", sect.segmentName(), sect.sectionName(), incrementalPatchSpace);
+			uint64_t patch = static_cast<uint64_t>(offset * 0.1);
+			if (strcmp(sect.sectionName(), "__cstring") == 0 ||
+				strcmp(sect.sectionName(), "__objc_classname") == 0 ||
+				strcmp(sect.sectionName(), "__objc_data") == 0 ||
+				strcmp(sect.sectionName(), "__objc_superrefs") == 0) {
+				patch = offset;
+			}
+			uint32_t incrementalPatchSpace = (patch + (alignment - 1)) & (-alignment);
+			fprintf(stderr, "incremental segment:%s, section:%s, incremental patch space:%u\n", sect.segmentName(), sect.sectionName(), incrementalPatchSpace);
 			return incrementalPatchSpace;
 		}
 	}

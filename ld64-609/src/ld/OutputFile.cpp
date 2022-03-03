@@ -3630,9 +3630,6 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 		if (takesNoDiskSpace(sect)) {
 			continue;
 		}
-		if (strcmp(sect->sectionName(), "__text") != 0) {
-			continue;
-		}
 		const bool sectionUsesNops = (sect->type() == ld::Section::typeCode);
 		//fprintf(stderr, "file offset=0x%08llX, section %s\n", sect->fileOffset, sect->sectionName());
 		bool lastAtomWasThumb = false;
@@ -3654,8 +3651,8 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 					continue;
 				}
 				// check for alignment padding between atoms
-				if ((patchFileOffset != fileOffsetOfEndOfLastAtom) && lastAtomUsesNoOps ) {
-					this->copyNoOps(&wholeBuffer[fileOffsetOfEndOfLastAtom], &wholeBuffer[patchFileOffset], lastAtomWasThumb);
+				if ((patchFileOffset != fileOffsetOfEndOfLastAtom) && lastAtomUsesNoOps) {
+//					this->copyNoOps(&wholeBuffer[fileOffsetOfEndOfLastAtom], &wholeBuffer[patchFileOffset], lastAtomWasThumb);
 				}
 				// copy atom content
 				atom->copyRawContent(&wholeBuffer[patchFileOffset]);

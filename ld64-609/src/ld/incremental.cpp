@@ -387,9 +387,11 @@ void Parser<A>::parseIncrementalSections() {
                 // patch space
                 fIncrementalPatchSpaceSection_ = (const PatchSpaceSectionEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off());
                 const PatchSpaceSectionEntry<P> *patchSpaceEnd = (const PatchSpaceSectionEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off() + incrementalCommand->patch_space_size());
-                for (PatchSpaceSectionEntry<P> *p = const_cast<PatchSpaceSectionEntry<P> *>(fIncrementalPatchSpaceSection_); p < patchSpaceEnd; p++) {
+                PatchSpaceSectionEntry<P> *p = const_cast<PatchSpaceSectionEntry<P> *>(fIncrementalPatchSpaceSection_);
+                uint32_t patchCount = patchSpaceEnd - fIncrementalPatchSpaceSection_;
+                for (uint32_t patchIndex = 0; patchIndex < patchCount; ++patchIndex, ++p) {
                     PatchSpace patchSpace;
-                    strncpy(patchSpace.sectname, p->sectname(), 16);
+                    strncpy(patchSpace.sectname, p->sectname(), 17);
                     patchSpace.patchOffset_ = p->patchOffset();
                     patchSpace.patchSpace_ = p->patchSpace();
                     incrPatchSpaceMap_[patchSpace.sectname] = patchSpace;
@@ -484,7 +486,15 @@ void Parser<A>::parseIndirectSymbolTable() {
                             }
                         }
                     }
-                    sectionStartAddressMap_[sect->sectname()] = sect->addr();
+                    
+                    const char *name = sect->sectname();
+                    if (strlen(name) >= 16) {
+                        char sectionName[17];
+                        strlcpy(sectionName, name, 17);
+                        sectionStartAddressMap_[sectionName] = sect->addr();
+                    } else {
+                        sectionStartAddressMap_[name] = sect->addr();
+                    }
                 }
             }
             cmd = (const macho_load_command<P>*)(((uint8_t *)cmd) + cmd->cmdsize());

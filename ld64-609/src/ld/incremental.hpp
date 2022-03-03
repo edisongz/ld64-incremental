@@ -80,7 +80,7 @@ struct GlobalSymbolRefEntry {
 
 /// Incremental patch space
 struct PatchSpace {
-    char     sectname[16];    /* name of this section */
+    char     sectname[17];    /* name of this section */
     uint64_t patchOffset_;
     uint32_t patchSpace_;
 };
@@ -235,7 +235,7 @@ template <typename P>
 class PatchSpaceSectionEntry {
 public:
     const char *sectname() const INLINE { return fields.sectname; }
-    void setSectname(const char* value)    INLINE { strncpy(fields.sectname, value, 16); }
+    void setSectname(const char* value)    INLINE { strncpy(fields.sectname, value, 17); }
     
     uint64_t patchOffset() const INLINE { return E::get64(fields.patchOffset_); }
     void setPatchOffset(uint64_t value) INLINE { E::set64(fields.patchOffset_, value); }
