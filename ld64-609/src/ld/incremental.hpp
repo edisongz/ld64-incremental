@@ -334,17 +334,21 @@ public:
     uint8_t *wholeBuffer() { return wholeBuffer_; }
     void openBinary();
     void closeBinary();
+    constexpr uint64_t baseAddress() const { return baseAddress_; }
     constexpr PatchSpace &patchSpace(const char *sectName) { return patchSpace_[sectName]; }
     void forEachStubAtom(ld::File::AtomHandler& handler, ld::Internal& state);
     void forEachStubAtom(const std::function<void(const ld::Atom *)> &handler);
     constexpr uint64_t sectionStartAddress(const char *sectName) { return sectionStartAddressMap_[sectName]; }
+    constexpr uint64_t sectionPatchFileOffset(const char *sectName) { return sectionFileOffsetMap_[sectName] + patchSpace_[sectName].patchOffset_; }
     
 private:
     Options &_options;
     int fd_;
+    uint64_t baseAddress_;
     uint8_t *wholeBuffer_;
     std::unordered_map<std::string, PatchSpace> patchSpace_;
     std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
+    std::unordered_map<std::string, uint32_t> sectionFileOffsetMap_;
     std::vector<const ld::Atom *> stubAtoms_;
 };
 

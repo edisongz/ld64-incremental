@@ -267,7 +267,13 @@ void OutputFile::assignIncrementalAtomAddresses(ld::Internal &state) {
 					// linkedit layout is assigned later
 					break;
 				default:
-					(const_cast<ld::Atom*>(atom))->setSectionStartAddress(_incremental.sectionStartAddress(sect->sectionName()));
+					bool isStubSection = (strcmp(sect->sectionName(), "__stubs") == 0 || strcmp(sect->sectionName(), "__stub_helper") == 0);
+					uint64_t sectionStartAddress = _incremental.sectionStartAddress(sect->sectionName()) + _incremental.patchSpace(sect->sectionName()).patchOffset_;
+					if (isStubSection) {
+						// ignore patch space
+						sectionStartAddress = _incremental.sectionStartAddress(sect->sectionName());
+					}
+					(const_cast<ld::Atom*>(atom))->setSectionStartAddress(sectionStartAddress);
 					if ( log ) fprintf(stderr, "    atom=%p, addr=0x%08llX, name=%s\n", atom, atom->finalAddress(), atom->name());
 					break;
 			}
@@ -3618,12 +3624,9 @@ void OutputFile::writeAtoms(ld::Internal& state, uint8_t* wholeBuffer)
 void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer) {
 	uint64_t fileOffsetOfEndOfLastAtom = 0;
 	bool lastAtomUsesNoOps = false;
-	uint64_t baseAddress = _options.baseAddress();
+	uint64_t baseAddress = _incremental.baseAddress();
 	for (auto sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
 		ld::Internal::FinalSection *sect = *sit;
-		if ((sect->type() == ld::Section::typeMachHeader) && (_options.outputKind() != Options::kPreload)) {
-			baseAddress = sect->address;
-		}
 		if (sect->isSectionHidden()) {
 			continue;
 		}
@@ -3646,7 +3649,7 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 				if (patchSpace.patchSpace_ == 0) {
 					continue;
 				}
-				uint64_t patchFileOffset = patchSpace.patchOffset_;
+				const uint64_t patchFileOffset = _incremental.sectionPatchFileOffset(sect->sectionName());
 				if (atom->size() > patchSpace.patchSpace_) {
 					continue;
 				}

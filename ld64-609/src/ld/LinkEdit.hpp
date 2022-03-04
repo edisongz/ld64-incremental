@@ -2564,13 +2564,12 @@ void IncrementalPatchSpaceAtom<A>::encode() const {
 		if (strcmp(sect->segmentName(), "__TEXT") == 0 || strcmp(sect->segmentName(), "__DATA") == 0) {
 			ld::incremental::PatchSpaceSectionEntry<P> entry;
 			entry.setSectname(sect->sectionName());
-			entry.setPatchOffset(sect->fileOffset + sect->patchSpaceOffset_);
+			entry.setPatchOffset(sect->patchSpaceOffset_);
 			entry.setPatchSpace(sect->patchSpaceSize_);
 			this->_encodedData.append_mem(&entry, sizeof(ld::incremental::PatchSpaceSectionEntry<P>));
 		}
 		index++;
 	}
-	
 	this->_encodedData.pad_to_size(sizeof(pint_t));
 	this->_encoded = true;
 }

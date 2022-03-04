@@ -77,11 +77,14 @@ public:
     IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
     constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
     constexpr std::unordered_map<std::string, uint64_t> &sectionStartAddressMap() { return sectionStartAddressMap_; }
+    constexpr std::unordered_map<std::string, uint32_t> &sectionFileOffsetMap() { return sectionFileOffsetMap_; }
+    constexpr uint64_t baseAddress() const { return baseAddress_; }
     
 private:
     void checkMachOHeader();
     bool isStaticExecutable() const;
     void parseSymbolTable(const macho_load_command<P> *cmd);
+    
     void parseIndirectSymbolTable();
     uint32_t indirectSymbol(uint32_t indirectIndex) const;
     const macho_nlist<P> &symbolFromIndex(uint32_t index);
@@ -93,6 +96,7 @@ private:
     
     const uint8_t *fileContent_;
     uint32_t fileLength_;
+    uint64_t baseAddress_;
     const macho_header<P> *fHeader_;
     const macho_entry_point_command<P> *entryPoint_;
     const macho_segment_command<P> *linkEditSegment_;
@@ -115,10 +119,11 @@ private:
     IncrPatchSpaceMap incrPatchSpaceMap_;
     std::vector<const ld::Atom *> stubAtoms_;
     std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
+    std::unordered_map<std::string, uint32_t> sectionFileOffsetMap_;
 };
 
 template <typename A>
-Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime) : fileContent_(fileContent), fileLength_(fileLength), fHeader_(nullptr), entryPoint_(nullptr), fDynamicSymbolTable_(nullptr), symbolTable_(nullptr), symbolCount_(0), fIncrementalInputSection_(nullptr), fIncrementalSymbolSection_(nullptr), fIncrementalPatchSpaceSection_(nullptr), stringTable_(nullptr), stringTableEnd_(nullptr), indirectSymbolTable_(nullptr), indirectTableCount_(0), fIncrementalStrings_(nullptr) {
+Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime) : fileContent_(fileContent), fileLength_(fileLength), baseAddress_(0), fHeader_(nullptr), entryPoint_(nullptr), fDynamicSymbolTable_(nullptr), symbolTable_(nullptr), symbolCount_(0), fIncrementalInputSection_(nullptr), fIncrementalSymbolSection_(nullptr), fIncrementalPatchSpaceSection_(nullptr), stringTable_(nullptr), stringTableEnd_(nullptr), indirectSymbolTable_(nullptr), indirectTableCount_(0), fIncrementalStrings_(nullptr) {
     if (!validFile(fileContent)) {
         throw "not a mach-o file that can be checked";
     }
@@ -310,7 +315,9 @@ void Parser<A>::parseIncrementalSections() {
         switch (cmd->cmd()) {
             case macho_segment_command<P>::CMD: {
                 const macho_segment_command<P> *segCmd = (const macho_segment_command<P> *)cmd;
-                if (strcmp(segCmd->segname(), "__LINKEDIT") == 0) {
+                if (strcmp(segCmd->segname(), "__TEXT") == 0) {
+                    baseAddress_ = segCmd->vmaddr();
+                } else if (strcmp(segCmd->segname(), "__LINKEDIT") == 0) {
                     linkEditSegment_ = segCmd;
                 }
             } break;
@@ -319,6 +326,9 @@ void Parser<A>::parseIncrementalSections() {
                     throw "LC_MAIN can only be used in MH_EXECUTE file types";
                 }
                 entryPoint_ =  (macho_entry_point_command<P> *)cmd;
+            } break;
+            case LC_FUNCTION_STARTS: {
+                const macho_linkedit_data_command<P> *info = (macho_linkedit_data_command<P> *)cmd;
             } break;
             case LC_SYMTAB: {
                 this->parseSymbolTable(cmd);
@@ -492,8 +502,10 @@ void Parser<A>::parseIndirectSymbolTable() {
                         char sectionName[17];
                         strlcpy(sectionName, name, 17);
                         sectionStartAddressMap_[sectionName] = sect->addr();
+                        sectionFileOffsetMap_[sectionName] = sect->offset();
                     } else {
                         sectionStartAddressMap_[name] = sect->addr();
+                        sectionFileOffsetMap_[name] = sect->offset();
                     }
                 }
             }
@@ -666,6 +678,8 @@ void Incremental::openBinary() {
             patchSpace_ = std::move(parser.patchSpaceMap());
             stubAtoms_ = parser.stubAtoms();
             sectionStartAddressMap_ = parser.sectionStartAddressMap();
+            sectionFileOffsetMap_ = parser.sectionFileOffsetMap();
+            baseAddress_ = parser.baseAddress();
         }
             break;
 #endif
