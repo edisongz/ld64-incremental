@@ -328,7 +328,7 @@ void Parser<A>::parseIncrementalSections() {
                 entryPoint_ =  (macho_entry_point_command<P> *)cmd;
             } break;
             case LC_FUNCTION_STARTS: {
-                const macho_linkedit_data_command<P> *info = (macho_linkedit_data_command<P> *)cmd;
+//                const macho_linkedit_data_command<P> *info = (macho_linkedit_data_command<P> *)cmd;
             } break;
             case LC_SYMTAB: {
                 this->parseSymbolTable(cmd);

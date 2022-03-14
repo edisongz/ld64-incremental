@@ -51,8 +51,6 @@ struct IncrAtomEntry {
     uint32_t atomNameIndex_;
     uint64_t atomFileOffset_;
     uint64_t atomSize_;
-//        uint32_t fixupCount_;
-//        relocation_info fixups_[0];
 };
 
 /// Input entry
@@ -69,6 +67,17 @@ struct InputEntry {
     union {
         RelocObj relocObj[0];
     } u;
+};
+
+struct IncrFixup {
+    uint64_t address_;
+    uint32_t nameIndex_;
+};
+
+/// Input file relocations
+struct InputFileFixup {
+    uint32_t fixupCount_;             // fixupCount
+    IncrFixup fixups_[0];
 };
 
 /// Global symbol entry
@@ -91,6 +100,8 @@ struct macho_incremental_command {
     uint32_t file_count;  // file offset of data in __INCREMENTAL segment
     uint32_t inputs_off;  // file size of data in __INCREMENTAL segment
     uint32_t inputs_size; // file size of data in __INCREMENTAL segment
+    uint32_t fixups_off;
+    uint32_t fixups_size;
     uint32_t symtab_off;  // file size of data in __INCREMENTAL segment
     uint32_t symtab_size; // file size of data in __INCREMENTAL segment
     uint32_t patch_space_off;  // file size of data in __INCREMENTAL segment
@@ -184,6 +195,46 @@ public:
 
 private:
     InputEntry entry;
+};
+
+template <typename P>
+class IncrFixupEntry {
+public:
+    uint64_t address() const INLINE { return E::get64(entry.address_); }
+    void setAddress(uint64_t value) INLINE { E::set64(entry.address_, value); }
+    
+    uint32_t nameIndex() const INLINE { return E::get32(entry.nameIndex_); }
+    void setNameIndex(uint32_t value) INLINE { E::set32(entry.nameIndex_, value); }
+
+    typedef typename P::E E;
+
+private:
+    IncrFixup entry;
+};
+
+template <typename P>
+class InputFileFixupSection {
+public:
+    uint32_t fixupCount() const INLINE { return E::get32(fields.fixupCount_); }
+    void setFixupCount(uint32_t value)    INLINE { E::set32(fields.fixupCount_, value); }
+
+    std::vector<IncrFixupEntry<P>> fixups() const {
+        std::vector<IncrFixupEntry<P>> v;
+        IncrFixupEntry<P> *p = static_cast<IncrFixupEntry<P> *>(fields.fixups_);
+        for (uint32_t i = 0; i < fixupCount(); i++) {
+            IncrFixupEntry<P> fixup;
+            fixup.setAddress(p->address_);
+            fixup.setNameIndex(p->nameIndex_);
+            v.push_back(fixup);
+            p++;
+        }
+        return v;
+    }
+
+    typedef typename P::E E;
+
+private:
+    struct InputFileFixup fields;
 };
 
 // Incremental input entry command
@@ -286,6 +337,20 @@ public:
     }
     void set_inputs_size(uint32_t value) INLINE {
         E::set32(fields.inputs_size, value);
+    }
+    
+    uint32_t fixups_off() const INLINE {
+        return E::get32(fields.fixups_off);
+    }
+    void set_fixups_off(uint32_t value) INLINE {
+        E::set32(fields.fixups_off, value);
+    }
+    
+    uint32_t fixups_size() const INLINE {
+        return E::get32(fields.fixups_size);
+    }
+    void set_fixups_size(uint32_t value) INLINE {
+        E::set32(fields.fixups_size, value);
     }
 
     uint32_t symtab_off() const INLINE {

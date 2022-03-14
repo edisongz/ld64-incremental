@@ -2378,15 +2378,6 @@ void IncrementalInputsAtom<A>::encode() const {
 					atomEntry.setAtomNameIndex_(0);
 					atomEntry.setAtomFileOffset((*ait)->finalAddress() - sect.address + sect.fileOffset);
 					atomEntry.setAtomSize((*ait)->size());
-					
-//					uint32_t fixupsCount = 0;
-//					relocation_info *relocPtr = atomEntry.fixups_;
-//					for (auto fit = (*ait)->fixupsBegin(); fit != (*ait)->fixupsEnd(); fit++) {
-//						++fixupsCount;
-//
-////						memcpy(relocPtr++, <#const void *__src#>, <#size_t __n#>)
-//					}
-//					atomEntry.fixupCount_ = fixupsCount;
 					memcpy(atomPtr++, &atomEntry, sizeof(ld::incremental::AtomEntry<P>));
 				}
 				this->_encodedData.append_mem(entry, entrySize);
@@ -2413,6 +2404,118 @@ void IncrementalInputsAtom<A>::encode() const {
 			default:
 				break;
 		}
+	}
+	this->_encodedData.pad_to_size(sizeof(pint_t));
+	this->_encoded = true;
+}
+
+template <typename A>
+class IncrementalFixupsAtom : public LinkEditAtom {
+public:
+												IncrementalFixupsAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+													: LinkEditAtom(opts, state, writer, _s_section, 8), _opts(opts) {
+														this->_encoded = true;
+													}
+
+	virtual const char*							name() const		{ return "incremental fixups"; }
+	virtual void								encode() const;
+
+private:
+	typedef typename A::P						P;
+	typedef typename A::P::E					E;
+	typedef typename A::P::uint_t				pint_t;
+	const ld::Atom *targetAtomOfFixup(const ld::Fixup *fixup) const;
+	
+	const Options& 				_opts;
+	
+	static ld::Section			_s_section;
+};
+
+template <typename A>
+ld::Section IncrementalFixupsAtom<A>::_s_section("__LINKEDIT", "__incr_fixups", ld::Section::typeLinkEdit, true);
+
+template <typename A>
+const ld::Atom *IncrementalFixupsAtom<A>::targetAtomOfFixup(const ld::Fixup *fixup) const {
+	// FIXME: Is this right for makeThreadedStartsSection?
+	if ( !_opts.makeCompressedDyldInfo() && !_opts.makeThreadedStartsSection() && !_opts.makeChainedFixups() ) {
+		// For external relocations the classic mach-o format
+		// has addend only stored in the content.  That means
+		// that the address of the target is not used.
+		if (fixup->contentAddendOnly) {
+			return nullptr;
+		}
+	}
+	const ld::Atom *target = nullptr;
+	switch ( fixup->binding ) {
+		case ld::Fixup::bindingNone: // fall through
+		case ld::Fixup::bindingByNameUnbound:
+			return nullptr;
+		case ld::Fixup::bindingByContentBound:
+		case ld::Fixup::bindingDirectlyBound:
+			target = fixup->u.target;
+			if ( !target->finalAddressMode() && (target->contentType() == ld::Atom::typeLTOtemporary) )
+				throwf("reference to bitcode symbol '%s' which LTO has not compiled", target->name());
+			return target;
+		case ld::Fixup::bindingsIndirectlyBound:
+			target = _state.indirectBindingTable[fixup->u.bindingIndex];
+			if (!target->finalAddressMode()) {
+				if (target->contentType() == ld::Atom::typeLTOtemporary) {
+					throwf("reference to bitcode symbol '%s' which LTO has not compiled", target->name());
+				}
+				throwf("reference to symbol (which has not been assigned an address) %s", target->name());
+			}
+			return target;
+	}
+	throw "unexpected binding";
+}
+
+template <typename A>
+void IncrementalFixupsAtom<A>::encode() const {
+	// input files
+	uint32_t index = 0;
+	std::unordered_map<std::string, uint32_t> fileIndexMap;
+	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
+		fileIndexMap[it->path] = index++;
+	}
+	
+	std::unordered_map<const char *, uint32_t> stringTable;
+	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
+		ld::Internal::FinalSection *sect = *sit;
+		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
+			const ld::Atom *atom = *ait;
+			if (stringTable.find(atom->name()) == stringTable.end()) {
+				stringTable[atom->name()] = index++;
+			}
+		}
+	}
+	
+	std::vector<ld::incremental::IncrFixupEntry<P>> fixups;
+	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
+		ld::Internal::FinalSection *sect = *sit;
+		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
+			const ld::Atom *atom = *ait;
+			if (!atom->file() || atom->size() == 0) {
+				continue;
+			}
+			uint64_t fileOffset = atom->finalAddress() - sect->address + sect->fileOffset;
+			for (auto fit = atom->fixupsBegin(); fit != atom->fixupsEnd(); fit++) {
+				const ld::Atom *toTarget = targetAtomOfFixup(fit);
+				if (toTarget && toTarget->scope() != ld::Atom::scopeTranslationUnit && toTarget->file() && atom->file() != toTarget->file()) {
+					ld::incremental::IncrFixupEntry<P> entry;
+					entry.setAddress(fileOffset + fit->offsetInAtom);
+					entry.setNameIndex(stringTable[toTarget->name()]);
+					fixups.push_back(entry);
+				}
+			}
+		}
+	}
+	
+	ld::incremental::InputFileFixupSection<P> fixupSection;
+	fixupSection.setFixupCount(static_cast<uint32_t>(fixups.size()));
+	this->_encodedData.append_mem(&fixupSection, sizeof(uint32_t));
+	for (auto fit = fixups.begin(); fit != fixups.end(); fit++) {
+		ld::incremental::IncrFixupEntry<P> entry = *fit;
+		this->_encodedData.append_mem(&entry, sizeof(ld::incremental::IncrFixupEntry<P>));
 	}
 	this->_encodedData.pad_to_size(sizeof(pint_t));
 	this->_encoded = true;

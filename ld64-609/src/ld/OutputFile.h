@@ -98,6 +98,7 @@ public:
 	ld::Internal::FinalSection*	chainInfoSection;
 	ld::Internal::FinalSection*	codeSignatureSection;
 	ld::Internal::FinalSection*	incrementalSection;
+	ld::Internal::FinalSection*	incrementalFixupsSection;
 	ld::Internal::FinalSection*	incrementalSymTabSection;
 	ld::Internal::FinalSection*	incrementalPatchSpaceSection;
 	ld::Internal::FinalSection*	incrementalStringSection;
@@ -435,6 +436,7 @@ public:
 	class LinkEditAtom*						_optimizationHintsAtom;
 	class LinkEditAtom*						_chainedInfoAtom;
 	class LinkEditAtom*						_incrementalAtom;
+	class LinkEditAtom*						_incrementalFixupsAtom;
 	class LinkEditAtom*						_incrementalSymTabAtom;
 	class LinkEditAtom*						_incrementalPatchSpaceAtom;
 	class LinkEditAtom*						_incrementalStringTableAtom;

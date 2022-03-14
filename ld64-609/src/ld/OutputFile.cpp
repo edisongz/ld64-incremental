@@ -91,6 +91,7 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state, ld::incremental
 		indirectSymbolTableSection(NULL),
 		threadedPageStartsSection(NULL), codeSignatureSection(NULL),
 		incrementalSection(nullptr),
+		incrementalFixupsSection(nullptr),
 		incrementalSymTabSection(nullptr),
 		incrementalPatchSpaceSection(nullptr),
 		incrementalStringSection(nullptr),
@@ -134,6 +135,7 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state, ld::incremental
 		_dataInCodeAtom(NULL),
 		_optimizationHintsAtom(NULL),
 		_incrementalAtom(nullptr),
+		_incrementalFixupsAtom(nullptr),
 		_incrementalSymTabAtom(nullptr),
 		_incrementalPatchSpaceAtom(nullptr),
 		_incrementalStringTableAtom(nullptr),
@@ -362,6 +364,8 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 	if (_hasIncrementalLink) {
 		assert(_incrementalAtom != nullptr);
 		_incrementalAtom->encode();
+		assert(_incrementalFixupsAtom != nullptr);
+		_incrementalFixupsAtom->encode();
 		assert(_incrementalSymTabAtom != nullptr);
 		_incrementalSymTabAtom->encode();
 		assert(_incrementalPatchSpaceAtom != nullptr);
@@ -4536,6 +4540,8 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 			if (_hasIncrementalLink) {
 				_incrementalAtom = new IncrementalInputsAtom<x86>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<x86>(_options, state, *this);
+				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
 				_incrementalStringTableAtom = new IncrementalStringPoolAtom<x86>(_options, state, *this);
@@ -4617,6 +4623,8 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 			if (_hasIncrementalLink) {
 				_incrementalAtom = new IncrementalInputsAtom<x86_64>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<x86_64>(_options, state, *this);
+				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86_64>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
 				_incrementalStringTableAtom = new IncrementalStringPoolAtom<x86_64>(_options, state, *this);
@@ -4698,6 +4706,8 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 			if (_hasIncrementalLink) {
 				_incrementalAtom = new IncrementalInputsAtom<arm>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<arm>(_options, state, *this);
+				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
 				_incrementalStringTableAtom = new IncrementalStringPoolAtom<arm>(_options, state, *this);
@@ -4779,6 +4789,8 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 			if (_hasIncrementalLink) {
 				_incrementalAtom = new IncrementalInputsAtom<arm64>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<arm64>(_options, state, *this);
+				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
 				_incrementalPatchSpaceAtom = new IncrementalPatchSpaceAtom<arm64>(_options, state, *this);
@@ -4862,6 +4874,8 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 			if (_hasIncrementalLink) {
 				_incrementalAtom = new IncrementalInputsAtom<arm64_32>(_options, state, *this);
 				incrementalSection = state.addAtom(*_incrementalAtom);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<arm64_32>(_options, state, *this);
+				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
 				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64_32>(_options, state, *this);
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
 				_incrementalStringTableAtom = new IncrementalStringPoolAtom<arm64_32>(_options, state, *this);
