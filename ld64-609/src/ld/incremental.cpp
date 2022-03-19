@@ -66,6 +66,7 @@ public:
     typedef typename A::P::E E;
     typedef typename A::P::uint_t pint_t;
     using IncrInputMap = std::unordered_map<std::string, InputEntrySection<P> *>;
+    using IncrFixupsMap = std::unordered_map<std::string, std::vector<IncrFixup>>;
     using IncrPatchSpaceMap = std::unordered_map<std::string, PatchSpace>;
     
     static bool validFile(const uint8_t *fileContent);
@@ -74,6 +75,7 @@ public:
     bool hasValidEntryPoint() const { return entryPoint_ != nullptr; }
     bool canIncrementalUpdate();
     IncrInputMap &incrInputsMap() { return incrInputsMap_; }
+    constexpr IncrFixupsMap &incrFixupsMap() { return incrFixupsMap_; }
     IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
     constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
     constexpr std::unordered_map<std::string, uint64_t> &sectionStartAddressMap() { return sectionStartAddressMap_; }
@@ -91,7 +93,9 @@ private:
     const char *nameFromSymbol(const macho_nlist<P> &sym);
     bool weakImportFromSymbol(const macho_nlist<P> &sym);
     void parseIncrementalSections();
-    void checkIncrementalSection(const macho_segment_command<P>* segCmd, const macho_section<P>* sect);
+    
+    /// Parse incremental fixup sections
+    void parseIncrementalFixupSection(const IncrementalCommand<P> *incrementalCommand);
     uint8_t loadCommandSizeMask();
     
     const uint8_t *fileContent_;
@@ -104,8 +108,9 @@ private:
     const macho_nlist<P> *symbolTable_;
     uint32_t symbolCount_;
     const InputEntrySection<P> *fIncrementalInputSection_;
-    const GlobalSymbolTableEntry<P> *fIncrementalSymbolSection_;
+    const InputFileFixupSection<P> *incrementalFixupSection_;
     const PatchSpaceSectionEntry<P> *fIncrementalPatchSpaceSection_;
+    const GlobalSymbolTableEntry<P> *fIncrementalSymbolSection_;
     const char *stringTable_;
     const char *stringTableEnd_;
     const uint32_t *indirectSymbolTable_;
@@ -120,10 +125,13 @@ private:
     std::vector<const ld::Atom *> stubAtoms_;
     std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
     std::unordered_map<std::string, uint32_t> sectionFileOffsetMap_;
+    
+    // Incremental fixups map
+    IncrFixupsMap incrFixupsMap_;
 };
 
 template <typename A>
-Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime) : fileContent_(fileContent), fileLength_(fileLength), baseAddress_(0), fHeader_(nullptr), entryPoint_(nullptr), fDynamicSymbolTable_(nullptr), symbolTable_(nullptr), symbolCount_(0), fIncrementalInputSection_(nullptr), fIncrementalSymbolSection_(nullptr), fIncrementalPatchSpaceSection_(nullptr), stringTable_(nullptr), stringTableEnd_(nullptr), indirectSymbolTable_(nullptr), indirectTableCount_(0), fIncrementalStrings_(nullptr) {
+Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path, time_t modTime) : fileContent_(fileContent), fileLength_(fileLength), baseAddress_(0), fHeader_(nullptr), entryPoint_(nullptr), fDynamicSymbolTable_(nullptr), symbolTable_(nullptr), symbolCount_(0), fIncrementalInputSection_(nullptr), incrementalFixupSection_(nullptr), fIncrementalPatchSpaceSection_(nullptr), fIncrementalSymbolSection_(nullptr), stringTable_(nullptr), stringTableEnd_(nullptr), indirectSymbolTable_(nullptr), indirectTableCount_(0), fIncrementalStrings_(nullptr) {
     if (!validFile(fileContent)) {
         throw "not a mach-o file that can be checked";
     }
@@ -382,6 +390,8 @@ void Parser<A>::parseIncrementalSections() {
                     incrInputPtr = (InputEntrySection<P> *)(((uint8_t *)incrInputPtr) + size);
                 }
                 
+                this->parseIncrementalFixupSection(incrementalCommand);
+                
                 // incremental global symbol table
                 fIncrementalSymbolSection_ = (const GlobalSymbolTableEntry<P> *)((uint8_t *)fHeader_ + incrementalCommand->symtab_off());
                 GlobalSymbolTableEntry<P> *symbolStart = const_cast<GlobalSymbolTableEntry<P> *>(fIncrementalSymbolSection_);
@@ -413,6 +423,22 @@ void Parser<A>::parseIncrementalSections() {
         }
         cmd = (const macho_load_command<P>*)endOfCmd;
     }
+}
+
+template <typename A>
+void Parser<A>::parseIncrementalFixupSection(const IncrementalCommand<P> *incrementalCommand) {
+    incrementalFixupSection_ = (const InputFileFixupSection<P> *)((uint8_t *)fHeader_ + incrementalCommand->fixups_off());
+    incrementalFixupSection_->forEachFixup([&](const IncrFixupEntry<P> &fixup) {
+        std::string key = incrStringPool_[fixup.nameIndex()];
+        if (incrFixupsMap_.find(key) == incrFixupsMap_.end()) {
+            std::vector<IncrFixup> fixups;
+            fixups.push_back({fixup.address(), fixup.nameIndex()});
+            incrFixupsMap_[key] = fixups;
+        } else {
+            auto &fixups = incrFixupsMap_[key];
+            fixups.push_back({fixup.address(), fixup.nameIndex()});
+        }
+    });
 }
 
 template <typename A>
@@ -542,11 +568,6 @@ const char *Parser<A>::nameFromSymbol(const macho_nlist<P> &sym) {
 template <typename A>
 bool Parser<A>::weakImportFromSymbol(const macho_nlist<P> &sym) {
     return (((sym.n_type() & N_TYPE) == N_UNDF) && ((sym.n_desc() & N_WEAK_REF) != 0));
-}
-
-template <typename A>
-void Parser<A>::checkIncrementalSection(const macho_segment_command<P> *segCmd, const macho_section<P> *sect) {
-    
 }
 
 #pragma mark - Incremental

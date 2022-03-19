@@ -230,6 +230,14 @@ public:
         }
         return v;
     }
+    
+    void forEachFixup(const std::function<void (const IncrFixupEntry<P> &)> &handler) const {
+        IncrFixupEntry<P> *p = (IncrFixupEntry<P> *)fields.fixups_;
+        for (uint32_t i = 0; i < fixupCount(); i++) {
+            IncrFixupEntry<P> fixup = *p++;
+            handler(fixup);
+        }
+    }
 
     typedef typename P::E E;
 
