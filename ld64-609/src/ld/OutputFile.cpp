@@ -3638,8 +3638,12 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 			continue;
 		}
 		const bool sectionUsesNops = (sect->type() == ld::Section::typeCode);
-		//fprintf(stderr, "file offset=0x%08llX, section %s\n", sect->fileOffset, sect->sectionName());
 		bool lastAtomWasThumb = false;
+		// Section __objc_classlist
+		bool isObjCClassListSection = (strcmp(sect->sectionName(), "__objc_classlist") == 0);
+		ld::incremental::PatchSpace patchSpace = _incremental.patchSpace(sect->sectionName());
+		uint64_t patchFileOffset = _incremental.sectionPatchFileOffset(sect->sectionName());
+		uint32_t freeSpace = patchSpace.patchSpace_;
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 			ld::Atom *atom = const_cast<ld::Atom *>(*ait);
 			if (atom->definition() == ld::Atom::definitionProxy) {
@@ -3649,12 +3653,7 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 				continue;
 			}
 			try {
-				ld::incremental::PatchSpace patchSpace = _incremental.patchSpace(sect->sectionName());
-				if (patchSpace.patchSpace_ == 0) {
-					continue;
-				}
-				const uint64_t patchFileOffset = _incremental.sectionPatchFileOffset(sect->sectionName());
-				if (atom->size() > patchSpace.patchSpace_) {
+				if (freeSpace <= 0 || atom->size() > freeSpace) {
 					continue;
 				}
 				// check for alignment padding between atoms
@@ -3666,9 +3665,11 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 				// apply fix ups
 				this->applyFixUps(state, baseAddress, atom, &wholeBuffer[patchFileOffset]);
 				fileOffsetOfEndOfLastAtom = patchFileOffset + atom->size();
+				patchFileOffset += atom->size();
+				freeSpace -= atom->size();
 				lastAtomUsesNoOps = sectionUsesNops;
 				lastAtomWasThumb = atom->isThumb();
-				fprintf(stderr, "incremental section:%s, atom:%s\n", sect->sectionName(), atom->name());
+				fprintf(stderr, "incremental section:%s, atom:%s, space:%u\n", sect->sectionName(), atom->name(), freeSpace);
 			} catch (const char* msg) {
 				throwf("%s in '%s' from %s", msg, atom->name(), atom->safeFilePath());
 			}

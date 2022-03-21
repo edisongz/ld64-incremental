@@ -1201,7 +1201,7 @@ uint32_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection& 
 		}
 		if (strcmp(sect.segmentName(), "__TEXT") == 0 || strcmp(sect.segmentName(), "__DATA") == 0) {
 			uint64_t alignment = 1 << maxAlignment;
-			uint64_t patch = static_cast<uint64_t>(offset * 0.1);
+			uint64_t patch = static_cast<uint64_t>(offset * 0.3);
 			if (strcmp(sect.sectionName(), "__cstring") == 0 ||
 				strcmp(sect.sectionName(), "__objc_classname") == 0 ||
 				strcmp(sect.sectionName(), "__objc_data") == 0 ||
