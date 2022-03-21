@@ -46,9 +46,8 @@ public:
     virtual void            setFile(const ld::File* file) override {};
     const char *            installname() const { return _installname; }
     uint32_t                compat_version() const { return _compatVersion; }
+    
 private:
-
-//    const File*                _file;
     const char*             _name;
     const char*             _installname;
     uint64_t                _address;
@@ -58,6 +57,42 @@ private:
 };
 
 ld::Section StubAtom::_s_section("__TEXT", "__import", ld::Section::typeImportProxies, true);
+
+template <typename A>
+class ObjCClass {
+public:
+    typedef typename A::P::uint_t            pint_t;
+    const char *objcClassName(uint64_t addressInClassList) const;
+    
+#pragma pack (1)
+    struct Content {
+        pint_t isa;
+        pint_t superclass;
+        pint_t method_cache;
+        pint_t vtable;
+        pint_t data;
+    };
+
+    struct ROContent {
+        uint32_t flags;
+        uint32_t instanceStart;
+        // Note there is 4-bytes of alignment padding between instanceSize
+        // and ivarLayout on 64-bit archs, but no padding on 32-bit archs.
+        // This union is a way to model that.
+        union {
+            uint32_t instanceSize;
+            pint_t pad;
+        } instanceSize;
+        pint_t ivarLayout;
+        pint_t name;
+        pint_t baseMethods;
+        pint_t baseProtocols;
+        pint_t ivars;
+        pint_t weakIvarLayout;
+        pint_t baseProperties;
+    };
+#pragma pack()
+};
 
 template <typename A>
 class Parser {
@@ -74,6 +109,7 @@ public:
     bool hasValidEntryPoint() const { return entryPoint_ != nullptr; }
     bool canIncrementalUpdate();
     IncrInputMap &incrInputsMap() { return incrInputsMap_; }
+    constexpr std::unordered_map<const char *, uint32_t> &objcClassIndexMap() { return objcClassIndexMap_; }
     constexpr IncrFixupsMap &incrFixupsMap() { return incrFixupsMap_; }
     IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
     constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
@@ -91,11 +127,26 @@ private:
     const macho_nlist<P> &symbolFromIndex(uint32_t index);
     const char *nameFromSymbol(const macho_nlist<P> &sym);
     bool weakImportFromSymbol(const macho_nlist<P> &sym);
+    uint8_t loadCommandSizeMask();
+    
+    /// Passe segment __TEXT
+    void parseTextSegment(const macho_segment_command<P> *segCmd);
+    void parseObjCClassName(const macho_section<P> *sect);
+ 
+    /// Parse segment __DATA_CONST
+    void parseDataConstSegment(const macho_segment_command<P> *segCmd);
+    /// Parse ObjC classlist
+    void parseObjcClassList(const macho_section<P> *sect);
+    
+    /// Parse segment __DATA
+    void parseDataSegment(const macho_segment_command<P> *segCmd);
+    void parseObjCData(const macho_section<P> *sect);
+ 
+    /// Parse Incremental sections
     void parseIncrementalSections();
     
     /// Parse incremental fixup sections
     void parseIncrementalFixupSection(const IncrementalCommand<P> *incrementalCommand);
-    uint8_t loadCommandSizeMask();
     
     const uint8_t *fileContent_;
     uint32_t fileLength_;
@@ -124,6 +175,10 @@ private:
     std::vector<const ld::Atom *> stubAtoms_;
     std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
     std::unordered_map<std::string, uint32_t> sectionFileOffsetMap_;
+    /// ObjC class address
+    std::vector<uint64_t> objcClassAddresses_;
+    /// ObjC class index map
+    std::unordered_map<const char *, uint32_t> objcClassIndexMap_;
     
     // Incremental fixups map
     IncrFixupsMap incrFixupsMap_;
@@ -324,6 +379,11 @@ void Parser<A>::parseIncrementalSections() {
                 const macho_segment_command<P> *segCmd = (const macho_segment_command<P> *)cmd;
                 if (strcmp(segCmd->segname(), "__TEXT") == 0) {
                     baseAddress_ = segCmd->vmaddr();
+                    parseTextSegment(segCmd);
+                } else if (strcmp(segCmd->segname(), "__DATA_CONST") == 0) {
+                    parseDataConstSegment(segCmd);
+                } else if (strcmp(segCmd->segname(), "__DATA") == 0) {
+                    parseDataSegment(segCmd);
                 } else if (strcmp(segCmd->segname(), "__LINKEDIT") == 0) {
                     linkEditSegment_ = segCmd;
                 }
@@ -421,6 +481,74 @@ void Parser<A>::parseIncrementalSections() {
                 break;
         }
         cmd = (const macho_load_command<P>*)endOfCmd;
+    }
+}
+
+template <typename A>
+void Parser<A>::parseTextSegment(const macho_segment_command<P> *segCmd) {
+    const macho_section<P> *const sectionsStart = (macho_section<P>*)((char *)segCmd + sizeof(macho_segment_command<P>));
+    const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
+    for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd; ++sect) {
+        if (strncmp(sect->sectname(), "__objc_classname", 16) == 0) {
+            parseObjCClassName(sect);
+        }
+    }
+}
+
+template <typename A>
+void Parser<A>::parseObjCClassName(const macho_section<P> *sect) {
+    
+}
+
+template <typename A>
+void Parser<A>::parseDataConstSegment(const macho_segment_command<P> *segCmd) {
+    const macho_section<P> *const sectionsStart = (macho_section<P>*)((char *)segCmd + sizeof(macho_segment_command<P>));
+    const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
+    for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd; ++sect) {
+        if (strncmp(sect->sectname(), "__objc_classlist", 16) == 0) {
+            parseObjcClassList(sect);
+        }
+    }
+}
+
+template <typename A>
+void Parser<A>::parseObjcClassList(const macho_section<P> *sect) {
+    const uint64_t *p = (const uint64_t *)((uint8_t *)fHeader_ + sect->offset());
+    uint32_t entryCount = sect->size() / sizeof(pint_t);
+    for (uint32_t i = 0; i < entryCount; i++) {
+        objcClassAddresses_.push_back(E::get64(*p++));
+    }
+}
+
+template <typename A>
+void Parser<A>::parseDataSegment(const macho_segment_command<P> *segCmd) {
+    const macho_section<P> *const sectionsStart = (macho_section<P>*)((char *)segCmd + sizeof(macho_segment_command<P>));
+    const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
+    for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd; ++sect) {
+        if (strcmp(sect->sectname(), "__objc_data") == 0) {
+            parseObjCData(sect);
+        }
+    }
+}
+
+template <typename A>
+void Parser<A>::parseObjCData(const macho_section<P> *sect) {
+    const uint8_t *sectionStart = (uint8_t *)fHeader_ + sect->offset();
+    const uint8_t *sectionEnd = (uint8_t *)fHeader_ + sect->offset() + sect->size();
+    for (auto ait = objcClassAddresses_.begin(); ait != objcClassAddresses_.end(); ++ait) {
+        // section __objc_classlist
+        uint64_t offset = *ait - baseAddress();
+        const uint8_t *objcClassPtr = (uint8_t *)fHeader_ + offset;
+        assert(objcClassPtr >= sectionStart && objcClassPtr < sectionEnd);
+        const uint64_t *objcClassContent = (const uint64_t *)(objcClassPtr + offsetof(typename ObjCClass<A>::Content, data));
+        // section __objc_const
+        const uint64_t objcClassDataOffset = E::get64(*objcClassContent) - baseAddress();
+        const uint8_t *objcClassDataPtr = (uint8_t *)fHeader_ + objcClassDataOffset;
+        const uint64_t *objcClassNamePtr = (const uint64_t *)(objcClassDataPtr + offsetof(typename ObjCClass<A>::ROContent, name));
+        // section __objc_classname
+        const uint64_t objcClassNameOffset = E::get64(*objcClassNamePtr) - baseAddress();
+        const char *objcClassName = (const char *)((uint8_t *)fHeader_ + objcClassNameOffset);
+        objcClassIndexMap_[objcClassName] = offset;
     }
 }
 
@@ -695,6 +823,7 @@ void Incremental::openBinary() {
                 incrementalFiles.insert((*it).path);
             }
             _options.removeIncrementalInputFiles(incrementalFiles);
+            objcClassIndexMap_ = parser.objcClassIndexMap();
             patchSpace_ = std::move(parser.patchSpaceMap());
             stubAtoms_ = parser.stubAtoms();
             incrFixupsMap_ = parser.incrFixupsMap();

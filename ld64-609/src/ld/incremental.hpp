@@ -397,6 +397,7 @@ public:
     void openBinary();
     void closeBinary();
     constexpr uint64_t baseAddress() const { return baseAddress_; }
+    constexpr uint32_t objcClassOffset(const char *className) { return objcClassIndexMap_[className]; }
     constexpr PatchSpace &patchSpace(const char *sectName) { return patchSpace_[sectName]; }
     void forEachStubAtom(ld::File::AtomHandler& handler, ld::Internal& state);
     void forEachStubAtom(const std::function<void(const ld::Atom *)> &handler);
@@ -409,6 +410,8 @@ private:
     int fd_;
     uint64_t baseAddress_;
     uint8_t *wholeBuffer_;
+    /// ObjC class index map
+    std::unordered_map<const char *, uint32_t> objcClassIndexMap_;
     IncrFixupsMap incrFixupsMap_;
     std::unordered_map<std::string, PatchSpace> patchSpace_;
     std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
