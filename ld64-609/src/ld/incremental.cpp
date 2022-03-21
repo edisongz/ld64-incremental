@@ -66,7 +66,6 @@ public:
     typedef typename A::P::E E;
     typedef typename A::P::uint_t pint_t;
     using IncrInputMap = std::unordered_map<std::string, InputEntrySection<P> *>;
-    using IncrFixupsMap = std::unordered_map<std::string, std::vector<IncrFixup>>;
     using IncrPatchSpaceMap = std::unordered_map<std::string, PatchSpace>;
     
     static bool validFile(const uint8_t *fileContent);
@@ -698,6 +697,7 @@ void Incremental::openBinary() {
             _options.removeIncrementalInputFiles(incrementalFiles);
             patchSpace_ = std::move(parser.patchSpaceMap());
             stubAtoms_ = parser.stubAtoms();
+            incrFixupsMap_ = parser.incrFixupsMap();
             sectionStartAddressMap_ = parser.sectionStartAddressMap();
             sectionFileOffsetMap_ = parser.sectionFileOffsetMap();
             baseAddress_ = parser.baseAddress();

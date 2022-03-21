@@ -217,19 +217,6 @@ class InputFileFixupSection {
 public:
     uint32_t fixupCount() const INLINE { return E::get32(fields.fixupCount_); }
     void setFixupCount(uint32_t value)    INLINE { E::set32(fields.fixupCount_, value); }
-
-    std::vector<IncrFixupEntry<P>> fixups() const {
-        std::vector<IncrFixupEntry<P>> v;
-        IncrFixupEntry<P> *p = static_cast<IncrFixupEntry<P> *>(fields.fixups_);
-        for (uint32_t i = 0; i < fixupCount(); i++) {
-            IncrFixupEntry<P> fixup;
-            fixup.setAddress(p->address_);
-            fixup.setNameIndex(p->nameIndex_);
-            v.push_back(fixup);
-            p++;
-        }
-        return v;
-    }
     
     void forEachFixup(const std::function<void (const IncrFixupEntry<P> &)> &handler) const {
         IncrFixupEntry<P> *p = (IncrFixupEntry<P> *)fields.fixups_;
@@ -401,6 +388,8 @@ private:
     struct macho_incremental_command fields;
 };
 
+using IncrFixupsMap = std::unordered_map<std::string, std::vector<IncrFixup>>;
+
 class Incremental {
 public:
     explicit Incremental(Options &options) : _options(options), wholeBuffer_(nullptr) {}
@@ -411,6 +400,7 @@ public:
     constexpr PatchSpace &patchSpace(const char *sectName) { return patchSpace_[sectName]; }
     void forEachStubAtom(ld::File::AtomHandler& handler, ld::Internal& state);
     void forEachStubAtom(const std::function<void(const ld::Atom *)> &handler);
+    constexpr std::vector<IncrFixup> &findRelocations(const char *atomName) { return incrFixupsMap_[atomName]; }
     constexpr uint64_t sectionStartAddress(const char *sectName) { return sectionStartAddressMap_[sectName]; }
     constexpr uint64_t sectionPatchFileOffset(const char *sectName) { return sectionFileOffsetMap_[sectName] + patchSpace_[sectName].patchOffset_; }
     
@@ -419,6 +409,7 @@ private:
     int fd_;
     uint64_t baseAddress_;
     uint8_t *wholeBuffer_;
+    IncrFixupsMap incrFixupsMap_;
     std::unordered_map<std::string, PatchSpace> patchSpace_;
     std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
     std::unordered_map<std::string, uint32_t> sectionFileOffsetMap_;
