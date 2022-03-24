@@ -15,6 +15,25 @@
 namespace ld {
 namespace incremental {
 
+static uint64_t read_uleb128(const uint8_t *&p, const uint8_t *end) {
+    uint64_t result = 0;
+    int bit = 0;
+    do {
+        if (p == end) {
+            throwf("malformed uleb128");
+        }
+        uint64_t slice = *p & 0x7f;
+        if (bit >= 64 || slice << bit >> bit != slice) {
+            throwf("uleb128 too big");
+        } else {
+            result |= (slice << bit);
+            bit += 7;
+        }
+    }
+    while (*p++ & 0x80);
+    return result;
+}
+
 //
 // An StubAtom has no content.  It exists so that the linker can track which
 // imported symbols came from which dynamic libraries.
@@ -111,14 +130,17 @@ public:
     IncrInputMap &incrInputsMap() { return incrInputsMap_; }
     constexpr std::unordered_map<const char *, uint32_t> &objcClassIndexMap() { return objcClassIndexMap_; }
     constexpr IncrFixupsMap &incrFixupsMap() { return incrFixupsMap_; }
-    IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
+    constexpr IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
     constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
     constexpr std::unordered_map<std::string, uint64_t> &sectionStartAddressMap() { return sectionStartAddressMap_; }
     constexpr std::unordered_map<std::string, uint32_t> &sectionFileOffsetMap() { return sectionFileOffsetMap_; }
     constexpr uint64_t baseAddress() const { return baseAddress_; }
+    constexpr std::vector<SegmentBoundary> &segmentBoundaries() { return segmentBoundaries_; }
+    constexpr std::vector<std::pair<uint8_t, uint64_t>> &rebaseInfo() { return rebaseInfo_; }
     
 private:
     void checkMachOHeader();
+    pint_t segStartAddress(uint8_t segIndex);
     bool isStaticExecutable() const;
     void parseSymbolTable(const macho_load_command<P> *cmd);
     
@@ -141,6 +163,9 @@ private:
     /// Parse segment __DATA
     void parseDataSegment(const macho_segment_command<P> *segCmd);
     void parseObjCData(const macho_section<P> *sect);
+    
+    /// Parse dynamic loader info
+    void parseDyldInfoSegment(const macho_dyld_info_command<P> *segCmd);
  
     /// Parse Incremental sections
     void parseIncrementalSections();
@@ -180,8 +205,14 @@ private:
     /// ObjC class index map
     std::unordered_map<const char *, uint32_t> objcClassIndexMap_;
     
-    // Incremental fixups map
+    /// Incremental fixups map
     IncrFixupsMap incrFixupsMap_;
+    /// All Segments
+    std::vector<const macho_segment_command<P> *> fSegments_;
+    /// Segment boundary
+    std::vector<SegmentBoundary> segmentBoundaries_;
+    /// Dyld rebase info
+    std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
 };
 
 template <typename A>
@@ -291,6 +322,14 @@ bool Parser<arm64_32>::validFile(const uint8_t *fileContent) {
 }
 #endif // SUPPORT_ARCH_arm64_32
 
+template <typename A>
+typename A::P::uint_t Parser<A>::segStartAddress(uint8_t segIndex) {
+    if (segIndex > fSegments_.size()) {
+        throw "segment index out of range";
+    }
+    return fSegments_[segIndex]->vmaddr();
+}
+
 template <> uint8_t Parser<ppc>::loadCommandSizeMask()    { return 0x03; }
 template <> uint8_t Parser<ppc64>::loadCommandSizeMask()    { return 0x07; }
 template <> uint8_t Parser<x86>::loadCommandSizeMask()    { return 0x03; }
@@ -377,6 +416,11 @@ void Parser<A>::parseIncrementalSections() {
         switch (cmd->cmd()) {
             case macho_segment_command<P>::CMD: {
                 const macho_segment_command<P> *segCmd = (const macho_segment_command<P> *)cmd;
+                fSegments_.push_back(segCmd);
+                SegmentBoundary boundary;
+                boundary.start_ = segCmd->vmaddr();
+                boundary.size_ = segCmd->vmsize();
+                segmentBoundaries_.push_back(boundary);
                 if (strcmp(segCmd->segname(), "__TEXT") == 0) {
                     baseAddress_ = segCmd->vmaddr();
                     parseTextSegment(segCmd);
@@ -387,6 +431,10 @@ void Parser<A>::parseIncrementalSections() {
                 } else if (strcmp(segCmd->segname(), "__LINKEDIT") == 0) {
                     linkEditSegment_ = segCmd;
                 }
+            } break;
+            case LC_DYLD_INFO:
+            case LC_DYLD_INFO_ONLY: {
+                parseDyldInfoSegment((const macho_dyld_info_command<P> *)cmd);
             } break;
             case LC_MAIN: {
                 if (fHeader_->filetype() != MH_EXECUTE) {
@@ -553,6 +601,83 @@ void Parser<A>::parseObjCData(const macho_section<P> *sect) {
 }
 
 template <typename A>
+void Parser<A>::parseDyldInfoSegment(const macho_dyld_info_command<P> *segCmd) {
+    const uint8_t *p = (uint8_t *)fHeader_ + segCmd->rebase_off();
+    const uint8_t *sectionEnd = &p[segCmd->rebase_size()];
+    uint8_t type = 0;
+    uint64_t segOffset = 0;
+    uint32_t count;
+    uint32_t skip;
+    int segIndex;
+    pint_t segStartAddr = 0;
+    pint_t addr;
+    bool done = false;
+    while (!done && (p < sectionEnd)) {
+        uint8_t immediate = *p & REBASE_IMMEDIATE_MASK;
+        uint8_t opcode = *p & REBASE_OPCODE_MASK;
+        ++p;
+        switch (opcode) {
+            case REBASE_OPCODE_DONE:
+                done = true;
+                break;
+            case REBASE_OPCODE_SET_TYPE_IMM:
+                type = immediate;
+                break;
+            case REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+                segIndex = immediate;
+                segStartAddr = segStartAddress(segIndex);
+                segOffset = read_uleb128(p, sectionEnd);
+                break;
+            case REBASE_OPCODE_ADD_ADDR_ULEB:
+                segOffset += read_uleb128(p, sectionEnd);
+                break;
+            case REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
+                segOffset += immediate * sizeof(pint_t);
+                break;
+            case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
+                for (int i = 0; i < immediate; ++i) {
+                    addr = segStartAddr + segOffset;
+//                    if ((rangeStart <= addr) && (addr < rangeEnd))
+//                        return;
+                    rebaseInfo_.push_back({type, addr});
+                    segOffset += sizeof(pint_t);
+                }
+                break;
+            case REBASE_OPCODE_DO_REBASE_ULEB_TIMES:
+                count = read_uleb128(p, sectionEnd);
+                for (uint32_t i = 0; i < count; ++i) {
+                    addr = segStartAddr + segOffset;
+//                    if ( (rangeStart <= addr) && (addr < rangeEnd) )
+//                        return;
+                    rebaseInfo_.push_back({type, addr});
+                    segOffset += sizeof(pint_t);
+                }
+                break;
+            case REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
+                addr = segStartAddr + segOffset;
+//                if ((rangeStart <= addr) && (addr < rangeEnd))
+//                    return;
+                rebaseInfo_.push_back({type, addr});
+                segOffset += read_uleb128(p, sectionEnd) + sizeof(pint_t);
+                break;
+            case REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB:
+                count = read_uleb128(p, sectionEnd);
+                skip = read_uleb128(p, sectionEnd);
+                for (uint32_t i=0; i < count; ++i) {
+                    addr = segStartAddr + segOffset;
+//                    if ( (rangeStart <= addr) && (addr < rangeEnd) )
+//                        return;
+                    rebaseInfo_.push_back({type, addr});
+                    segOffset += skip + sizeof(pint_t);
+                }
+                break;
+            default:
+                throwf("bad rebase opcode %d", *p);
+        }
+    }
+}
+
+template <typename A>
 void Parser<A>::parseIncrementalFixupSection(const IncrementalCommand<P> *incrementalCommand) {
     incrementalFixupSection_ = (const InputFileFixupSection<P> *)((uint8_t *)fHeader_ + incrementalCommand->fixups_off());
     incrementalFixupSection_->forEachFixup([&](const IncrFixupEntry<P> &fixup) {
@@ -616,53 +741,64 @@ void Parser<A>::parseIndirectSymbolTable() {
         
         const macho_load_command<P> *cmd = cmds;
         for (uint32_t i = 0; i < cmd_count; ++i) {
-            if (cmd->cmd() == macho_segment_command<P>::CMD) {
-                const macho_segment_command<P> *segCmd = (const macho_segment_command<P> *)cmd;
-                const macho_section<P> *const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
-                const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
-                for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd; ++sect) {
-                    // make sure all magic sections that use indirect symbol table fit within it
-                    uint32_t start = 0;
-                    uint32_t elementSize = 0;
-                    switch (sect->flags() & SECTION_TYPE) {
-                        case S_SYMBOL_STUBS:
-                            elementSize = sect->reserved2();
-                            start = sect->reserved1();
-                            break;
-//                        case S_LAZY_SYMBOL_POINTERS:
-                        case S_NON_LAZY_SYMBOL_POINTERS:
-                            elementSize = sizeof(pint_t);
-                            start = sect->reserved1();
-                            break;
-                    }
-                    if (elementSize != 0) {
-                        auto patch = incrPatchSpaceMap_[sect->sectname()];
-                        uint32_t count = (sect->size() - patch.patchSpace_) / elementSize;
-                        for (uint32_t index = 0; index < count; ++index) {
-                            uint32_t symIndex = this->indirectSymbol(start + index);
-                            if (symIndex != INDIRECT_SYMBOL_LOCAL) {
-                                const macho_nlist<P> &sym = this->symbolFromIndex(symIndex);
-                                pint_t address = sect->addr() + index * sizeof(pint_t);
-//                                const char *fromDylib = classicOrdinalName(GET_LIBRARY_ORDINAL(sym->n_desc()));
-                                fprintf(stderr, "sect:%s, stub symbol:%s, %llu\n", sect->sectname(), this->nameFromSymbol(sym), (uint64_t)address);
-                                stubAtoms_.push_back(new ld::incremental::StubAtom(this->nameFromSymbol(sym), "", 1, this->weakImportFromSymbol(sym), false, (uint64_t)address));
+            switch (cmd->cmd()) {
+                case macho_segment_command<P>::CMD: {
+                    const macho_segment_command<P> *segCmd = (const macho_segment_command<P> *)cmd;
+                    const macho_section<P> *const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
+                    const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
+                    for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd; ++sect) {
+                        // make sure all magic sections that use indirect symbol table fit within it
+                        uint32_t start = 0;
+                        uint32_t elementSize = 0;
+                        switch (sect->flags() & SECTION_TYPE) {
+                            case S_SYMBOL_STUBS:
+                                elementSize = sect->reserved2();
+                                start = sect->reserved1();
+                                break;
+    //                        case S_LAZY_SYMBOL_POINTERS:
+                            case S_NON_LAZY_SYMBOL_POINTERS:
+                                elementSize = sizeof(pint_t);
+                                start = sect->reserved1();
+                                break;
+                        }
+                        if (elementSize != 0) {
+                            auto patch = incrPatchSpaceMap_[sect->sectname()];
+                            uint32_t count = (sect->size() - patch.patchSpace_) / elementSize;
+                            for (uint32_t index = 0; index < count; ++index) {
+                                uint32_t symIndex = this->indirectSymbol(start + index);
+                                if (symIndex != INDIRECT_SYMBOL_LOCAL) {
+                                    const macho_nlist<P> &sym = this->symbolFromIndex(symIndex);
+                                    pint_t address = sect->addr() + index * sizeof(pint_t);
+                                    fprintf(stderr, "sect:%s, stub symbol:%s, %llu\n", sect->sectname(), this->nameFromSymbol(sym), (uint64_t)address);
+                                    stubAtoms_.push_back(new ld::incremental::StubAtom(this->nameFromSymbol(sym), "", 1, this->weakImportFromSymbol(sym), false, (uint64_t)address));
+                                }
                             }
                         }
+                        
+                        const char *name = sect->sectname();
+                        if (strlen(name) >= 16) {
+                            char sectionName[17];
+                            strlcpy(sectionName, name, 17);
+                            sectionStartAddressMap_[sectionName] = sect->addr();
+                            sectionFileOffsetMap_[sectionName] = sect->offset();
+                        } else {
+                            sectionStartAddressMap_[name] = sect->addr();
+                            sectionFileOffsetMap_[name] = sect->offset();
+                        }
                     }
-                    
-                    const char *name = sect->sectname();
-                    if (strlen(name) >= 16) {
-                        char sectionName[17];
-                        strlcpy(sectionName, name, 17);
-                        sectionStartAddressMap_[sectionName] = sect->addr();
-                        sectionFileOffsetMap_[sectionName] = sect->offset();
-                    } else {
-                        sectionStartAddressMap_[name] = sect->addr();
-                        sectionFileOffsetMap_[name] = sect->offset();
-                    }
+                } break;
+                case LC_DYLD_INFO:
+                case LC_DYLD_INFO_ONLY: {
+                    const macho_dyld_info_command<P> *segCmd = (const macho_dyld_info_command<P> *)cmd;
+                    sectionStartAddressMap_["__rebase"] = baseAddress() + segCmd->rebase_off();
+                    sectionFileOffsetMap_["__rebase"] = segCmd->rebase_off();
                 }
+                    break;
+                default:
+                    break;
             }
-            cmd = (const macho_load_command<P>*)(((uint8_t *)cmd) + cmd->cmdsize());
+        
+            cmd = (const macho_load_command<P> *)(((uint8_t *)cmd) + cmd->cmdsize());
         }
     }
 }
@@ -824,12 +960,14 @@ void Incremental::openBinary() {
             }
             _options.removeIncrementalInputFiles(incrementalFiles);
             objcClassIndexMap_ = parser.objcClassIndexMap();
-            patchSpace_ = std::move(parser.patchSpaceMap());
+            patchSpace_ = parser.patchSpaceMap();
             stubAtoms_ = parser.stubAtoms();
             incrFixupsMap_ = parser.incrFixupsMap();
             sectionStartAddressMap_ = parser.sectionStartAddressMap();
             sectionFileOffsetMap_ = parser.sectionFileOffsetMap();
             baseAddress_ = parser.baseAddress();
+            segmentBoundaries_ = parser.segmentBoundaries();
+            rebaseInfo_ = parser.rebaseInfo();
         }
             break;
 #endif
@@ -856,6 +994,19 @@ void Incremental::forEachStubAtom(ld::File::AtomHandler &handler, ld::Internal &
 void Incremental::forEachStubAtom(const std::function<void (const ld::Atom *)> &handler) {
     for (auto ait = stubAtoms_.begin(); ait != stubAtoms_.end(); ++ait) {
         handler(*ait);
+    }
+}
+
+void Incremental::forEachSegmentBoundary(const std::function<void (SegmentBoundary &, uint32_t)> &handler) {
+    uint32_t index = 0;
+    for (auto it = segmentBoundaries_.begin(); it != segmentBoundaries_.end(); ++it) {
+        handler(*it, index++);
+    }
+}
+
+void Incremental::forEachRebaseInfo(const std::function<void (std::pair<uint8_t, uint64_t> &)> &handler) {
+    for (auto it = rebaseInfo_.begin(); it != rebaseInfo_.end(); ++it) {
+        handler(*it);
     }
 }
 

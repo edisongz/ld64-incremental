@@ -355,6 +355,22 @@ void RebaseInfoAtom<A>::encodeV1() const
 			p->opcode = REBASE_OPCODE_DO_REBASE_IMM_TIMES;
 		}
 	}
+	
+	uint64_t patchOffset = 0;
+	rebase_tmp *patchStart = nullptr;
+	if (_options.enableIncrementalLink()) {
+		// Incremental patch rebase info
+		for (auto rit = mid.begin(); rit != mid.end(); ++rit) {
+			rebase_tmp &elem = *rit;
+			if (elem.opcode == REBASE_OPCODE_DONE) {
+				elem.opcode = REBASE_OPCODE_ADD_ADDR_ULEB;
+				elem.operand1 = 0;
+				if (!patchStart) {
+					patchStart = &*rit;
+				}
+			}
+		}
+	}
 
 	// convert to compressed encoding
 	const static bool log = false;
@@ -405,8 +421,21 @@ void RebaseInfoAtom<A>::encodeV1() const
 				this->_encodedData.append_uleb128(it->operand2);
 				break;
 		}
+		if (patchStart == &*it) {
+			patchOffset = this->_encodedData.size();
+		}
 	}
 	
+	if (_options.enableIncrementalLink() && patchOffset > 0) {
+		auto sit = std::find_if(_state.sections.begin(), _state.sections.end(), [](ld::Internal::FinalSection *sect) {
+			return strcmp(sect->sectionName(), "__rebase") == 0;
+		});
+		if (sit != _state.sections.end()) {
+			ld::Internal::FinalSection *rebaseSection = *sit;
+			rebaseSection->patchSpaceOffset_ = patchOffset;
+			rebaseSection->patchSpaceSize_ = this->_encodedData.size() - patchOffset;
+		}
+	}
 		
 	// align to pointer size
 	this->_encodedData.pad_to_size(sizeof(pint_t));
@@ -2657,21 +2686,19 @@ ld::Section IncrementalPatchSpaceAtom<A>::_s_section("__LINKEDIT", "__incr_patch
 
 template <typename A>
 void IncrementalPatchSpaceAtom<A>::encode() const {
-	uint32_t index = 0;
 	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); ++sit) {
 		ld::Internal::FinalSection *sect = *sit;
-		if (sect->isSectionHidden()) {
-			index++;
+		bool isRebaseSection = (strcmp(sect->sectionName(), "__rebase") == 0);
+		if (!isRebaseSection && sect->isSectionHidden()) {
 			continue;
 		}
-		if (strcmp(sect->segmentName(), "__TEXT") == 0 || strcmp(sect->segmentName(), "__DATA") == 0) {
+		if (strcmp(sect->segmentName(), "__TEXT") == 0 || strcmp(sect->segmentName(), "__DATA") == 0 || strcmp(sect->sectionName(), "__cfstring") == 0 || isRebaseSection) {
 			ld::incremental::PatchSpaceSectionEntry<P> entry;
 			entry.setSectname(sect->sectionName());
 			entry.setPatchOffset(sect->patchSpaceOffset_);
 			entry.setPatchSpace(sect->patchSpaceSize_);
 			this->_encodedData.append_mem(&entry, sizeof(ld::incremental::PatchSpaceSectionEntry<P>));
 		}
-		index++;
 	}
 	this->_encodedData.pad_to_size(sizeof(pint_t));
 	this->_encoded = true;

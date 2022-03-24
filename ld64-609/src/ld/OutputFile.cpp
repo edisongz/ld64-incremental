@@ -165,8 +165,51 @@ void OutputFile::dumpAtomsBySection(ld::Internal& state, bool printAtoms)
 void OutputFile::write(ld::Internal& state)
 {
 	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+		this->addLinkEdit(state);
 		state.setSectionSizesAndAlignments();
 		this->assignIncrementalAtomAddresses(state);
+		_incremental.forEachRebaseInfo([&](std::pair<uint8_t, uint64_t> item) {
+			_rebaseInfo.push_back(RebaseInfo(item.first, item.second));
+		});
+		this->generateLinkEditInfo(state);
+//		this->updateLINKEDITAddresses(state);
+		
+		if ( _options.makeCompressedDyldInfo() || state.cantUseChainedFixups) {
+			// build dylb rebasing info
+			assert(_rebasingInfoAtom != NULL);
+			_rebasingInfoAtom->encode();
+		}
+		
+		// assign rebase section address
+		uint64_t curLinkEditAddress = _incremental.sectionStartAddress("__rebase");
+		uint64_t curLinkEditfileOffset = _incremental.sectionFileOffset("__rebase");
+		for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
+			ld::Internal::FinalSection* sect = *sit;
+			if (sect->type() != ld::Section::typeLinkEdit) {
+				continue;
+			}
+			if (strcmp(sect->sectionName(), "__rebase") != 0) {
+				continue;
+			}
+			uint64_t offset = 0;
+			for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+				const ld::Atom* atom = *ait;
+				(const_cast<ld::Atom*>(atom))->setSectionOffset(offset);
+				(const_cast<ld::Atom*>(atom))->setSectionStartAddress(curLinkEditAddress);
+				offset += atom->size();
+			}
+			sect->size = offset;
+			sect->address = curLinkEditAddress;
+			sect->fileOffset = curLinkEditfileOffset;
+			curLinkEditAddress += sect->size;
+			curLinkEditfileOffset += sect->size;
+		}
+		
+		if ( _hasCodeSignature ) {
+			assert(_codeSignatureAtom != NULL);
+			_codeSignatureAtom->encode();
+		}
+		
 		this->writeOutputFileIncremental(state);
 		return;
 	}
@@ -194,6 +237,19 @@ void OutputFile::write(ld::Internal& state)
 
 bool OutputFile::findSegment(ld::Internal& state, uint64_t addr, uint64_t* start, uint64_t* end, uint32_t* index)
 {
+	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+		bool found = false;
+		_incremental.forEachSegmentBoundary([&](ld::incremental::SegmentBoundary &boundary, uint32_t segIndex) {
+			if ((addr >= boundary.start_) && (addr < boundary.start_ + boundary.size_)) {
+				*start = boundary.start_;
+				*end = boundary.start_ + boundary.size_;
+				*index = segIndex;
+				found = true;
+			}
+		});
+		return found;
+	}
+	
 	uint32_t segIndex = 0;
 	ld::Internal::FinalSection* segFirstSection = NULL;
 	ld::Internal::FinalSection* lastSection = NULL;
@@ -3632,11 +3688,23 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 	for (auto sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
 		ld::Internal::FinalSection *sect = *sit;
 		if (sect->isSectionHidden()) {
+			if (strcmp(sect->segmentName(), "__LINKEDIT") == 0) {
+				this->updateLinkEditIncremental(state, sect, wholeBuffer);
+			}
 			continue;
 		}
 		if (takesNoDiskSpace(sect)) {
 			continue;
 		}
+		
+		if (strcmp(sect->sectionName(), "__objc_classname") == 0) {
+			fprintf(stderr, "\n");
+			for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+				const ld::Atom *atom = *ait;
+				fprintf(stderr, "classname:%s\n", (const char *)atom->rawContentPointer());
+			}
+		}
+		
 		const bool sectionUsesNops = (sect->type() == ld::Section::typeCode);
 		bool lastAtomWasThumb = false;
 		// Section __objc_classlist
@@ -3653,7 +3721,7 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 				continue;
 			}
 			try {
-				if (freeSpace <= 0 || atom->size() > freeSpace) {
+				if (!isObjCClassListSection && (freeSpace <= 0 || atom->size() > freeSpace)) {
 					continue;
 				}
 				// check for alignment padding between atoms
@@ -4048,6 +4116,27 @@ void OutputFile::writeOutputFileIncremental(ld::Internal &state) {
 	uint8_t *wholeBuffer = _incremental.wholeBuffer();
 	writeAtomsIncremental(state, wholeBuffer);
 	_incremental.closeBinary();
+}
+
+void OutputFile::updateLinkEditIncremental(ld::Internal &state, ld::Internal::FinalSection *sect, uint8_t *wholeBuffer) {
+	if (strcmp(sect->sectionName(), "__rebase") != 0) {
+		return;
+	}
+	for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+		const ld::Atom* atom = *ait;
+		if (sect->type() != ld::Section::typeLinkEdit) {
+			continue;
+		}
+		try {
+			uint64_t fileOffset = atom->finalAddress() - sect->address + sect->fileOffset;
+			// copy atom content
+			atom->copyRawContent(&wholeBuffer[fileOffset]);
+			// apply fix ups
+			this->applyFixUps(state, _incremental.baseAddress(), atom, &wholeBuffer[fileOffset]);
+		} catch (const char* msg) {
+			throwf("%s in '%s'", msg, atom->name());
+		}
+	}
 }
 
 struct AtomByNameSorter
@@ -5878,6 +5967,12 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 			}
 		}
 	}
+	
+	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+		needsBinding = false;
+		needsLazyBinding = false;
+		needsWeakBinding = false;
+	}
 
 	// Find the ordinal for the bind target
 	int compressedOrdinal = 0;
@@ -5932,7 +6027,16 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 			}
 			_hasUnalignedFixup = true;
 		}
-		_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
+		if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+			if (strcmp(sect->sectionName(), "__cfstring") == 0 ||
+				strcmp(sect->sectionName(), "__objc_const") == 0 ||
+				strcmp(sect->sectionName(), "__objc_superrefs") == 0 ||
+				strcmp(sect->sectionName(), "__objc_data") == 0) {
+				_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
+			}
+		} else {
+			_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
+		}
 	}
 
 	if ( (needsBinding || needsWeakBinding) && _options.sharedRegionEligible() && (addend > 31) )

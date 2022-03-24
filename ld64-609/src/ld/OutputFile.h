@@ -185,7 +185,8 @@ public:
 
 private:
 	void						writeAtoms(ld::Internal& state, uint8_t* wholeBuffer);
-	void						writeAtomsIncremental(ld::Internal& state, uint8_t* wholeBuffer);
+	void						writeAtomsIncremental(ld::Internal& state, uint8_t *wholeBuffer);
+	void						updateLinkEditIncremental(ld::Internal &state, ld::Internal::FinalSection *sect, uint8_t *wholeBuffer);
 	void						computeContentUUID(ld::Internal& state, uint8_t* wholeBuffer);
 	void						buildDylibOrdinalMapping(ld::Internal&);
 	bool						hasOrdinalForInstallPath(const char* path, int* ordinal);

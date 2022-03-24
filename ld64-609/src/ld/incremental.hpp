@@ -109,6 +109,11 @@ struct macho_incremental_command {
     uint32_t strtab_off;  // file size of data in __INCREMENTAL segment
     uint32_t strtab_size; // file size of data in __INCREMENTAL segment
 };
+
+struct SegmentBoundary {
+    uint64_t start_;
+    uint32_t size_;
+};
 #pragma pack()
 
 template <typename P>
@@ -401,9 +406,16 @@ public:
     constexpr PatchSpace &patchSpace(const char *sectName) { return patchSpace_[sectName]; }
     void forEachStubAtom(ld::File::AtomHandler& handler, ld::Internal& state);
     void forEachStubAtom(const std::function<void(const ld::Atom *)> &handler);
+    void forEachSegmentBoundary(const std::function<void(SegmentBoundary &, uint32_t)> &handler);
+    void forEachRebaseInfo(const std::function<void(std::pair<uint8_t, uint64_t> &)> &handler);
     constexpr std::vector<IncrFixup> &findRelocations(const char *atomName) { return incrFixupsMap_[atomName]; }
     constexpr uint64_t sectionStartAddress(const char *sectName) { return sectionStartAddressMap_[sectName]; }
+    constexpr uint64_t sectionFileOffset(const char *sectName) { return sectionFileOffsetMap_[sectName]; }
     constexpr uint64_t sectionPatchFileOffset(const char *sectName) { return sectionFileOffsetMap_[sectName] + patchSpace_[sectName].patchOffset_; }
+    
+    constexpr std::vector<std::pair<uint8_t, uint64_t>> &rebaseInfo() {
+        return rebaseInfo_;
+    }
     
 private:
     Options &_options;
@@ -417,6 +429,8 @@ private:
     std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
     std::unordered_map<std::string, uint32_t> sectionFileOffsetMap_;
     std::vector<const ld::Atom *> stubAtoms_;
+    std::vector<SegmentBoundary> segmentBoundaries_;
+    std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
 };
 
 } // namespace incremental
