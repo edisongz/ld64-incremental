@@ -114,9 +114,9 @@ struct SegmentBoundary {
 };
 
 struct SectionBoundary {
-  uint64_t address_;
-  uint64_t fileOffset_;
-  uint64_t size_;
+  uint64_t address_;    // section vm address
+  uint64_t fileOffset_; // seciton file offset
+  uint64_t size_;       // section size
 };
 #pragma pack()
 
@@ -431,8 +431,6 @@ class Incremental {
   std::unordered_map<const char *, uint32_t> objcClassIndexMap_;
   IncrFixupsMap incrFixupsMap_;
   std::unordered_map<std::string, PatchSpace> patchSpace_;
-//  std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
-//  std::unordered_map<std::string, uint32_t> sectionFileOffsetMap_;
   std::vector<const ld::Atom *> stubAtoms_;
   std::vector<SegmentBoundary> segmentBoundaries_;
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;

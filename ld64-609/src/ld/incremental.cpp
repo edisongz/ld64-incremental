@@ -135,13 +135,7 @@ class Parser {
   constexpr IncrFixupsMap &incrFixupsMap() { return incrFixupsMap_; }
   constexpr IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
   constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
-//  constexpr std::unordered_map<std::string, uint64_t>
-//      &sectionStartAddressMap() {
-//    return sectionStartAddressMap_;
-//  }
-//  constexpr std::unordered_map<std::string, uint32_t> &sectionFileOffsetMap() {
-//    return sectionFileOffsetMap_;
-//  }
+
   constexpr uint64_t baseAddress() const { return baseAddress_; }
   constexpr std::vector<SegmentBoundary> &segmentBoundaries() {
     return segmentBoundaries_;
@@ -216,8 +210,7 @@ class Parser {
   std::vector<std::string> incrStringPool_;
   IncrPatchSpaceMap incrPatchSpaceMap_;
   std::vector<const ld::Atom *> stubAtoms_;
-//  std::unordered_map<std::string, uint64_t> sectionStartAddressMap_;
-//  std::unordered_map<std::string, uint32_t> sectionFileOffsetMap_;
+  /// MachO sections boundary
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   /// ObjC class address
   std::vector<uint64_t> objcClassAddresses_;
@@ -895,12 +888,8 @@ void Parser<A>::parseIndirectSymbolTable() {
             if (strlen(name) >= 16) {
               char sectionName[17];
               strlcpy(sectionName, name, 17);
-//              sectionStartAddressMap_[sectionName] = sect->addr();
-//              sectionFileOffsetMap_[sectionName] = sect->offset();
               sectionBoundaryMap_[sectionName] = sectionBoundary;
             } else {
-//              sectionStartAddressMap_[name] = sect->addr();
-//              sectionFileOffsetMap_[name] = sect->offset();
               sectionBoundaryMap_[name] = sectionBoundary;
             }
           }
@@ -914,9 +903,6 @@ void Parser<A>::parseIndirectSymbolTable() {
           sectionBoundary.fileOffset_ = segCmd->rebase_off();
           sectionBoundary.size_ = segCmd->rebase_size();
           sectionBoundaryMap_["__rebase"] = sectionBoundary;
-//          sectionStartAddressMap_["__rebase"] =
-//              baseAddress() + segCmd->rebase_off();
-//          sectionFileOffsetMap_["__rebase"] = segCmd->rebase_off();
         } break;
         default:
           break;
@@ -1089,8 +1075,6 @@ void Incremental::openBinary() {
       patchSpace_ = parser.patchSpaceMap();
       stubAtoms_ = parser.stubAtoms();
       incrFixupsMap_ = parser.incrFixupsMap();
-//      sectionStartAddressMap_ = parser.sectionStartAddressMap();
-//      sectionFileOffsetMap_ = parser.sectionFileOffsetMap();
       baseAddress_ = parser.baseAddress();
       segmentBoundaries_ = parser.segmentBoundaries();
       sectionBoundaryMap_ = parser.sectionBoundaryMap();
