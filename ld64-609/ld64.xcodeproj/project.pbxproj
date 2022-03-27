@@ -255,8 +255,8 @@
 		B3B672411406D42800A376BB /* Snapshot.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; name = Snapshot.cpp; path = src/ld/Snapshot.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		B3B672441406D44300A376BB /* Snapshot.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; name = Snapshot.h; path = src/ld/Snapshot.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		B3C7A09914295B9C005FC714 /* compile_stubs */ = {isa = PBXFileReference; lastKnownFileType = text.script.csh; path = compile_stubs; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
-		B4374D2727BA4BC10062D67D /* incremental.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = incremental.cpp; path = src/ld/incremental.cpp; sourceTree = "<group>"; };
-		B4374D2827BA4BC10062D67D /* incremental.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; name = incremental.hpp; path = src/ld/incremental.hpp; sourceTree = "<group>"; };
+		B4374D2727BA4BC10062D67D /* incremental.cpp */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = sourcecode.cpp.cpp; name = incremental.cpp; path = src/ld/incremental.cpp; sourceTree = "<group>"; tabWidth = 2; };
+		B4374D2827BA4BC10062D67D /* incremental.hpp */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = sourcecode.cpp.h; name = incremental.hpp; path = src/ld/incremental.hpp; sourceTree = "<group>"; tabWidth = 2; };
 		C1E27B571F6B1B67003B8FA6 /* thread_starts.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = thread_starts.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		C1E27B591F6B1B70003B8FA6 /* thread_starts.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = thread_starts.h; sourceTree = "<group>"; };
 		C1ED154623C934E800748423 /* objc_constants.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = objc_constants.cpp; sourceTree = "<group>"; };
