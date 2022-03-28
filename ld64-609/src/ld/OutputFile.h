@@ -71,6 +71,7 @@ public:
 	bool						needsBind(const ld::Atom* toTarget, bool authPtr, uint64_t* accumulator = nullptr,
 										  uint64_t* inlineAddend = nullptr, uint32_t* bindOrdinal = nullptr,
 										  uint32_t* libOrdinal = nullptr) const;
+	constexpr ld::incremental::Incremental &incremental() { return _incremental; };
 	
 	
 	bool						usesWeakExternalSymbols;

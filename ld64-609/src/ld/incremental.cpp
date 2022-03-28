@@ -140,11 +140,12 @@ class Parser {
   constexpr std::vector<SegmentBoundary> &segmentBoundaries() {
     return segmentBoundaries_;
   }
-  
-  constexpr std::unordered_map<std::string, SectionBoundary> &sectionBoundaryMap() {
+
+  constexpr std::unordered_map<std::string, SectionBoundary>
+      &sectionBoundaryMap() {
     return sectionBoundaryMap_;
   }
-  
+
   constexpr std::vector<std::pair<uint8_t, uint64_t>> &rebaseInfo() {
     return rebaseInfo_;
   }
@@ -181,14 +182,36 @@ class Parser {
   /// Parse Incremental sections
   void parseIncrementalSections();
 
-  /// Parse incremental fixup sections
+  /// Parse incremental fixup section
+  /// @param incrementalCommand LC_INCREMENTAL
   void parseIncrementalFixupSection(
+      const IncrementalCommand<P> *incrementalCommand);
+
+  /// Parse incremental inputs section
+  /// @param incrementalCommand LC_INCREMENTAL
+  void parseIncrementalInputsSection(
+      const IncrementalCommand<P> *incrementalCommand);
+
+  /// Parse incremental patch space section
+  /// @param incrementalCommand LC_INCREMENTAL
+  void parseIncrementalPatchSpaceSection(
+      const IncrementalCommand<P> *incrementalCommand);
+
+  /// Parse incremental global symbol table
+  /// @param incrementalCommand LC_INCREMENTAL
+  void parseIncrementalGlobalSymbols(
+      const IncrementalCommand<P> *incrementalCommand);
+
+  /// Parse incremental string pool
+  /// @param incrementalCommand LC_INCREMENTAL
+  void parseIncrementalStringPool(
       const IncrementalCommand<P> *incrementalCommand);
 
   const uint8_t *fileContent_;
   uint32_t fileLength_;
   uint64_t baseAddress_;
   const macho_header<P> *fHeader_;
+  const macho_dyld_info_command<P> *dyldInfo_;
   const macho_entry_point_command<P> *entryPoint_;
   const macho_segment_command<P> *linkEditSegment_;
   const macho_dysymtab_command<P> *fDynamicSymbolTable_;
@@ -234,6 +257,7 @@ Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength,
       fileLength_(fileLength),
       baseAddress_(0),
       fHeader_(nullptr),
+      dyldInfo_(nullptr),
       entryPoint_(nullptr),
       fDynamicSymbolTable_(nullptr),
       symbolTable_(nullptr),
@@ -253,6 +277,7 @@ Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength,
   fHeader_ = (const macho_header<P> *)fileContent_;
   this->checkMachOHeader();
   this->parseIncrementalSections();
+  this->parseDyldInfoSegment(dyldInfo_);
   this->parseIndirectSymbolTable();
 }
 
@@ -481,7 +506,7 @@ void Parser<A>::parseIncrementalSections() {
       } break;
       case LC_DYLD_INFO:
       case LC_DYLD_INFO_ONLY: {
-        parseDyldInfoSegment((const macho_dyld_info_command<P> *)cmd);
+        dyldInfo_ = (const macho_dyld_info_command<P> *)cmd;
       } break;
       case LC_MAIN: {
         if (fHeader_->filetype() != MH_EXECUTE) {
@@ -504,98 +529,11 @@ void Parser<A>::parseIncrementalSections() {
       } break;
       case LC_INCREMENTAL: {
         incrementalCommand = (IncrementalCommand<P> *)cmd;
-        // incremental string pool
-        fIncrementalStrings_ = (const char *)((uint8_t *)fHeader_ +
-                                              incrementalCommand->strtab_off());
-        char *stringStart = const_cast<char *>(fIncrementalStrings_);
-        char *stringEnd = const_cast<char *>(fIncrementalStrings_) +
-                          incrementalCommand->strtab_size();
-        uint32_t stringIdx = 0;
-        while (stringStart < stringEnd) {
-          const char *symName = &stringStart[stringIdx++];
-          if (!symName || strlen(symName) == 0) {
-            break;
-          }
-          incrStringPool_.push_back(symName);
-          stringStart += strlen(symName);
-        }
-
-        // incremental input files
-        fIncrementalInputSection_ =
-            (const InputEntrySection<P> *)((uint8_t *)fHeader_ +
-                                           incrementalCommand->inputs_off());
-        InputEntrySection<P> *incrInputPtr =
-            const_cast<InputEntrySection<P> *>(fIncrementalInputSection_);
-        for (uint32_t index = 0; index < incrementalCommand->file_count();
-             index++) {
-          size_t size = sizeof(InputEntrySection<P>);
-          switch (incrInputPtr->type()) {
-            case ld::File::Type::Reloc: {
-              uint32_t atomCount = incrInputPtr->atomCount();
-              size = 5 * sizeof(uint32_t) +
-                     sizeof(ld::incremental::AtomEntry<P>) * atomCount;
-            } break;
-            case ld::File::Type::Archive: {
-            } break;
-            case ld::File::Type::Dylib: {
-            } break;
-            case ld::File::Type::Other: {
-            } break;
-            default:
-              break;
-          }
-          incrInputs_.push_back(incrInputPtr);
-          incrInputsMap_
-              [incrStringPool_[incrInputPtr->fileIndexInStringTable()]] =
-                  incrInputPtr;
-          incrInputPtr =
-              (InputEntrySection<P> *)(((uint8_t *)incrInputPtr) + size);
-        }
-
+        this->parseIncrementalStringPool(incrementalCommand);
+        this->parseIncrementalInputsSection(incrementalCommand);
         this->parseIncrementalFixupSection(incrementalCommand);
-
-        // incremental global symbol table
-        fIncrementalSymbolSection_ =
-            (const GlobalSymbolTableEntry<P>
-                 *)((uint8_t *)fHeader_ + incrementalCommand->symtab_off());
-        GlobalSymbolTableEntry<P> *symbolStart =
-            const_cast<GlobalSymbolTableEntry<P> *>(fIncrementalSymbolSection_);
-        const GlobalSymbolTableEntry<P> *symbolEnd =
-            (const GlobalSymbolTableEntry<P>
-                 *)((uint8_t *)fHeader_ + incrementalCommand->symtab_off() +
-                    incrementalCommand->symtab_size());
-        while (symbolStart < symbolEnd) {
-          if ((symbolEnd - symbolStart) < 8) {
-            break;
-          }
-          incrSymbols_.push_back(symbolStart);
-          symbolStart = (GlobalSymbolTableEntry<P>
-                             *)(((uint8_t *)symbolStart) +
-                                (2 + symbolStart->referencedFileCount_()) *
-                                    sizeof(uint32_t));
-        }
-
-        // patch space
-        fIncrementalPatchSpaceSection_ =
-            (const PatchSpaceSectionEntry<P> *)((uint8_t *)fHeader_ +
-                                                incrementalCommand
-                                                    ->patch_space_off());
-        const PatchSpaceSectionEntry<P> *patchSpaceEnd =
-            (const PatchSpaceSectionEntry<P>
-                 *)((uint8_t *)fHeader_ +
-                    incrementalCommand->patch_space_off() +
-                    incrementalCommand->patch_space_size());
-        PatchSpaceSectionEntry<P> *p = const_cast<PatchSpaceSectionEntry<P> *>(
-            fIncrementalPatchSpaceSection_);
-        uint32_t patchCount = patchSpaceEnd - fIncrementalPatchSpaceSection_;
-        for (uint32_t patchIndex = 0; patchIndex < patchCount;
-             ++patchIndex, ++p) {
-          PatchSpace patchSpace;
-          strncpy(patchSpace.sectname, p->sectname(), 17);
-          patchSpace.patchOffset_ = p->patchOffset();
-          patchSpace.patchSpace_ = p->patchSpace();
-          incrPatchSpaceMap_[patchSpace.sectname] = patchSpace;
-        }
+        this->parseIncrementalGlobalSymbols(incrementalCommand);
+        this->parseIncrementalPatchSpaceSection(incrementalCommand);
       } break;
       default:
         break;
@@ -687,8 +625,13 @@ void Parser<A>::parseObjCData(const macho_section<P> *sect) {
 
 template <typename A>
 void Parser<A>::parseDyldInfoSegment(const macho_dyld_info_command<P> *segCmd) {
+  if (!segCmd) {
+    return;
+  }
+  const uint32_t rebasePatchOffset =
+      incrPatchSpaceMap_["__rebase"].patchOffset_;
   const uint8_t *p = (uint8_t *)fHeader_ + segCmd->rebase_off();
-  const uint8_t *sectionEnd = &p[segCmd->rebase_size()];
+  const uint8_t *sectionEnd = &p[rebasePatchOffset];
   uint8_t type = 0;
   uint64_t segOffset = 0;
   uint32_t count;
@@ -763,6 +706,41 @@ void Parser<A>::parseDyldInfoSegment(const macho_dyld_info_command<P> *segCmd) {
 }
 
 template <typename A>
+void Parser<A>::parseIncrementalInputsSection(
+    const IncrementalCommand<P> *incrementalCommand) {
+  if (!incrementalCommand) {
+    return;
+  }
+  fIncrementalInputSection_ =
+      (const InputEntrySection<P> *)((uint8_t *)fHeader_ +
+                                     incrementalCommand->inputs_off());
+  InputEntrySection<P> *incrInputPtr =
+      const_cast<InputEntrySection<P> *>(fIncrementalInputSection_);
+  for (uint32_t index = 0; index < incrementalCommand->file_count(); index++) {
+    size_t size = sizeof(InputEntrySection<P>);
+    switch (incrInputPtr->type()) {
+      case ld::File::Type::Reloc: {
+        uint32_t atomCount = incrInputPtr->atomCount();
+        size = 5 * sizeof(uint32_t) +
+               sizeof(ld::incremental::AtomEntry<P>) * atomCount;
+      } break;
+      case ld::File::Type::Archive: {
+      } break;
+      case ld::File::Type::Dylib: {
+      } break;
+      case ld::File::Type::Other: {
+      } break;
+      default:
+        break;
+    }
+    incrInputs_.push_back(incrInputPtr);
+    incrInputsMap_[incrStringPool_[incrInputPtr->fileIndexInStringTable()]] =
+        incrInputPtr;
+    incrInputPtr = (InputEntrySection<P> *)(((uint8_t *)incrInputPtr) + size);
+  }
+}
+
+template <typename A>
 void Parser<A>::parseIncrementalFixupSection(
     const IncrementalCommand<P> *incrementalCommand) {
   incrementalFixupSection_ =
@@ -779,6 +757,80 @@ void Parser<A>::parseIncrementalFixupSection(
       fixups.push_back({fixup.address(), fixup.nameIndex()});
     }
   });
+}
+
+template <typename A>
+void Parser<A>::parseIncrementalPatchSpaceSection(
+    const IncrementalCommand<P> *incrementalCommand) {
+  fIncrementalPatchSpaceSection_ =
+      (const PatchSpaceSectionEntry<P>
+           *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off());
+  const PatchSpaceSectionEntry<P> *patchSpaceEnd =
+      (const PatchSpaceSectionEntry<P>
+           *)((uint8_t *)fHeader_ + incrementalCommand->patch_space_off() +
+              incrementalCommand->patch_space_size());
+  PatchSpaceSectionEntry<P> *p =
+      const_cast<PatchSpaceSectionEntry<P> *>(fIncrementalPatchSpaceSection_);
+  uint32_t patchCount = patchSpaceEnd - fIncrementalPatchSpaceSection_;
+  for (uint32_t patchIndex = 0; patchIndex < patchCount; ++patchIndex, ++p) {
+    PatchSpace patchSpace;
+    strncpy(patchSpace.sectname, p->sectname(), 17);
+    patchSpace.patchOffset_ = p->patchOffset();
+    patchSpace.patchSpace_ = p->patchSpace();
+    incrPatchSpaceMap_[patchSpace.sectname] = patchSpace;
+  }
+}
+
+template <typename A>
+void Parser<A>::parseIncrementalGlobalSymbols(
+    const IncrementalCommand<P> *incrementalCommand) {
+  if (!incrementalCommand) {
+    return;
+  }
+  // incremental global symbol table
+  fIncrementalSymbolSection_ =
+      (const GlobalSymbolTableEntry<P> *)((uint8_t *)fHeader_ +
+                                          incrementalCommand->symtab_off());
+  GlobalSymbolTableEntry<P> *symbolStart =
+      const_cast<GlobalSymbolTableEntry<P> *>(fIncrementalSymbolSection_);
+  const GlobalSymbolTableEntry<P> *symbolEnd =
+      (const GlobalSymbolTableEntry<P> *)((uint8_t *)fHeader_ +
+                                          incrementalCommand->symtab_off() +
+                                          incrementalCommand->symtab_size());
+  while (symbolStart < symbolEnd) {
+    if ((symbolEnd - symbolStart) < 8) {
+      break;
+    }
+    incrSymbols_.push_back(symbolStart);
+    symbolStart =
+        (GlobalSymbolTableEntry<P> *)(((uint8_t *)symbolStart) +
+                                      (2 +
+                                       symbolStart->referencedFileCount_()) *
+                                          sizeof(uint32_t));
+  }
+}
+
+template <typename A>
+void Parser<A>::parseIncrementalStringPool(
+    const IncrementalCommand<P> *incrementalCommand) {
+  if (!incrementalCommand) {
+    return;
+  }
+  // incremental string pool
+  fIncrementalStrings_ =
+      (const char *)((uint8_t *)fHeader_ + incrementalCommand->strtab_off());
+  char *stringStart = const_cast<char *>(fIncrementalStrings_);
+  char *stringEnd = const_cast<char *>(fIncrementalStrings_) +
+                    incrementalCommand->strtab_size();
+  uint32_t stringIdx = 0;
+  while (stringStart < stringEnd) {
+    const char *symName = &stringStart[stringIdx++];
+    if (!symName || strlen(symName) == 0) {
+      break;
+    }
+    incrStringPool_.push_back(symName);
+    stringStart += strlen(symName);
+  }
 }
 
 template <typename A>

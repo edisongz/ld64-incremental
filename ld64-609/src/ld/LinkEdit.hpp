@@ -357,8 +357,11 @@ void RebaseInfoAtom<A>::encodeV1() const
 	}
 	
 	uint64_t patchOffset = 0;
+	uint64_t paddedSize = 0;
 	rebase_tmp *patchStart = nullptr;
 	if (_options.enableIncrementalLink()) {
+		ld::incremental::SectionBoundary &boundary = _writer.incremental().sectionBoundary("__rebase");
+		paddedSize = boundary.size_;
 		// Incremental patch rebase info
 		for (auto rit = mid.begin(); rit != mid.end(); ++rit) {
 			rebase_tmp &elem = *rit;
@@ -377,6 +380,11 @@ void RebaseInfoAtom<A>::encodeV1() const
 	this->_encodedData.reserve(info.size()*2);
 	bool done = false;
 	for (typename std::vector<rebase_tmp>::iterator it = mid.begin(); !done && it != mid.end() ; ++it) {
+		if (paddedSize > 0 && paddedSize - this->_encodedData.size() < sizeof(pint_t)) {
+			if (it->opcode != REBASE_OPCODE_DONE) {
+				it->opcode = REBASE_OPCODE_DONE;
+			}
+		}
 		switch ( it->opcode ) {
 			case REBASE_OPCODE_DONE:
 				if ( log ) fprintf(stderr, "REBASE_OPCODE_DONE()\n");
@@ -425,6 +433,11 @@ void RebaseInfoAtom<A>::encodeV1() const
 			patchOffset = this->_encodedData.size();
 		}
 	}
+		
+	// align to pointer size
+	this->_encodedData.pad_to_size(sizeof(pint_t));
+
+	this->_encoded = true;
 	
 	if (_options.enableIncrementalLink() && patchOffset > 0) {
 		auto sit = std::find_if(_state.sections.begin(), _state.sections.end(), [](ld::Internal::FinalSection *sect) {
@@ -436,11 +449,6 @@ void RebaseInfoAtom<A>::encodeV1() const
 			rebaseSection->patchSpaceSize_ = this->_encodedData.size() - patchOffset;
 		}
 	}
-		
-	// align to pointer size
-	this->_encodedData.pad_to_size(sizeof(pint_t));
-
-	this->_encoded = true;
 
 	if (log) fprintf(stderr, "total rebase info size = %ld\n", this->_encodedData.size());
 }
