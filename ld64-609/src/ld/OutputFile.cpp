@@ -165,9 +165,11 @@ void OutputFile::dumpAtomsBySection(ld::Internal& state, bool printAtoms)
 void OutputFile::write(ld::Internal& state)
 {
 	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+		_dylibToOrdinal.insert(_incremental.dylibToOrdinal().begin(), _incremental.dylibToOrdinal().end());
 		this->addLinkEdit(state);
 		state.setSectionSizesAndAlignments();
 		this->assignIncrementalAtomAddresses(state);
+		this->buildSymbolTable(state);
 		_incremental.forEachRebaseInfo([&](std::pair<uint8_t, uint64_t> item) {
 			_rebaseInfo.push_back(RebaseInfo(item.first, item.second));
 		});
@@ -180,17 +182,23 @@ void OutputFile::write(ld::Internal& state)
 			_rebasingInfoAtom->encode();
 		}
 		
+		// build classic symbol table
+		assert(_symbolTableAtom != NULL);
+		_symbolTableAtom->encode();
+//		assert(_indirectSymbolTableAtom != NULL);
+//		_indirectSymbolTableAtom->encode();
+		
 		// assign rebase section address
-		uint64_t curLinkEditAddress = _incremental.sectionStartAddress("__rebase");
-		uint64_t curLinkEditfileOffset = _incremental.sectionFileOffset("__rebase");
 		for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
 			ld::Internal::FinalSection* sect = *sit;
 			if (sect->type() != ld::Section::typeLinkEdit) {
 				continue;
 			}
-			if (strcmp(sect->sectionName(), "__rebase") != 0) {
+			if (strcmp(sect->sectionName(), "__rebase") != 0 && strcmp(sect->sectionName(), "__symbol_table") != 0) {
 				continue;
 			}
+			uint64_t curLinkEditAddress = _incremental.sectionStartAddress(sect->sectionName());
+			uint64_t curLinkEditfileOffset = _incremental.sectionFileOffset(sect->sectionName());
 			uint64_t offset = 0;
 			for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 				const ld::Atom* atom = *ait;

@@ -12,6 +12,7 @@
 #include <sys/mount.h>
 
 #include "Architectures.hpp"
+#include "generic_dylib_file.hpp"
 
 namespace ld {
 namespace incremental {
@@ -33,49 +34,6 @@ static uint64_t read_uleb128(const uint8_t *&p, const uint8_t *end) {
   } while (*p++ & 0x80);
   return result;
 }
-
-//
-// An StubAtom has no content.  It exists so that the linker can track which
-// imported symbols came from which dynamic libraries.
-//
-class StubAtom final : public ld::Atom {
- public:
-  StubAtom(const char *nm, const char *im, uint32_t cv, bool weakDef, bool tlv,
-           uint64_t address)
-      : ld::Atom(_s_section, ld::Atom::definitionProxy,
-                 (weakDef ? ld::Atom::combineByName : ld::Atom::combineNever),
-                 ld::Atom::scopeLinkageUnit,
-                 (tlv ? ld::Atom::typeTLV : ld::Atom::typeUnclassified),
-                 symbolTableNotIn, false, false, false, ld::Atom::Alignment(0)),
-        _name(nm),
-        _installname(im),
-        _address(address),
-        _compatVersion(cv) {}
-  virtual ~StubAtom() {}
-
-  // overrides of ld::Atom
-  virtual const ld::File *file() const override final { return nullptr; }
-  virtual const char *name() const override final { return _name; }
-  virtual uint64_t size() const override final { return 0; }
-  virtual uint64_t objectAddress() const override final { return _address; }
-  virtual void copyRawContent(uint8_t buffer[]) const override final {}
-
-  virtual void setScope(Scope) {}
-  virtual void setFile(const ld::File *file) override{};
-  const char *installname() const { return _installname; }
-  uint32_t compat_version() const { return _compatVersion; }
-
- private:
-  const char *_name;
-  const char *_installname;
-  uint64_t _address;
-  uint32_t _compatVersion;
-
-  static ld::Section _s_section;
-};
-
-ld::Section StubAtom::_s_section("__TEXT", "__import",
-                                 ld::Section::typeImportProxies, true);
 
 template <typename A>
 class ObjCClass {
@@ -148,6 +106,10 @@ class Parser {
 
   constexpr std::vector<std::pair<uint8_t, uint64_t>> &rebaseInfo() {
     return rebaseInfo_;
+  }
+
+  constexpr std::map<const ld::dylib::File *, int> &dylibToOrdinal() {
+    return dylibToOrdinal_;
   }
 
  private:
@@ -248,6 +210,11 @@ class Parser {
   std::vector<SegmentBoundary> segmentBoundaries_;
   /// Dyld rebase info
   std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
+  /// LOAD_DYLIB
+  std::vector<const macho_dylib_command<P> *> dylibLoadCommands_;
+  /// dylib ordinal map
+  std::map<const ld::dylib::File *, int> dylibToOrdinal_;
+  std::unordered_map<std::string, const macho_nlist<P> *> dylibSymbolMap_;
 };
 
 template <typename A>
@@ -526,6 +493,15 @@ void Parser<A>::parseIncrementalSections() {
           throw "LC_DYSYMTAB should not be used in static executable";
         }
         fDynamicSymbolTable_ = (const macho_dysymtab_command<P> *)cmd;
+      } break;
+      case LC_LOAD_DYLIB:
+      case LC_LOAD_WEAK_DYLIB:
+      case LC_REEXPORT_DYLIB:
+      case LC_LOAD_UPWARD_DYLIB:
+      case LC_LAZY_LOAD_DYLIB: {
+        const macho_dylib_command<P> *dylib =
+            (const macho_dylib_command<P> *)cmd;
+        dylibLoadCommands_.push_back(dylib);
       } break;
       case LC_INCREMENTAL: {
         incrementalCommand = (IncrementalCommand<P> *)cmd;
@@ -863,6 +839,21 @@ void Parser<A>::parseSymbolTable(const macho_load_command<P> *cmd) {
   if ((symtab->stroff() % 4) != 0) {
     throw "string pool start not pointer aligned";
   }
+
+  for (uint32_t i = 0; i < symbolCount_; ++i) {
+    const macho_nlist<P> *sym = &symbolTable_[i];
+    if ((sym->n_type() & N_TYPE) == N_UNDF && (sym->n_type() & N_EXT) != 0) {
+      // dylib symbol
+      dylibSymbolMap_[this->nameFromSymbol(*sym)] = sym;
+    }
+  }
+
+  // section boundary
+  SectionBoundary sectionBoundary;
+  sectionBoundary.address_ = baseAddress() + symtab->symoff();
+  sectionBoundary.fileOffset_ = symtab->symoff();
+  sectionBoundary.size_ = symtab->nsyms() * sizeof(macho_nlist<P>);
+  sectionBoundaryMap_["__symbol_table"] = sectionBoundary;
 }
 
 template <typename A>
@@ -921,13 +912,26 @@ void Parser<A>::parseIndirectSymbolTable() {
                 if (symIndex != INDIRECT_SYMBOL_LOCAL) {
                   const macho_nlist<P> &sym = this->symbolFromIndex(symIndex);
                   pint_t address = sect->addr() + index * sizeof(pint_t);
-                  fprintf(stderr, "sect:%s, stub symbol:%s, %llu\n",
+                  uint32_t ordinal = GET_LIBRARY_ORDINAL(sym.n_desc());
+                  const macho_dylib_command<P> *dylibCommand =
+                      dylibLoadCommands_[ordinal - 1];
+                  fprintf(stderr, "sect:%s, stub symbol:%s, %llu, ordinal:%u\n",
                           sect->sectname(), this->nameFromSymbol(sym),
+                          (uint64_t)address, ordinal);
+                  ld::VersionSet platforms;
+                  generic::dylib::File *file = new generic::dylib::File(
+                      dylibCommand->name(), 0,
+                      ld::File::Ordinal::makeArgOrdinal(ordinal), platforms,
+                      false, false, false, false, true);
+                  generic::dylib::ExportAtom *atom =
+                      new generic::dylib::ExportAtom(
+                          *file, this->nameFromSymbol(sym), "", 1,
+                          this->weakImportFromSymbol(sym), false,
                           (uint64_t)address);
-                  stubAtoms_.push_back(new ld::incremental::StubAtom(
-                      this->nameFromSymbol(sym), "", 1,
-                      this->weakImportFromSymbol(sym), false,
-                      (uint64_t)address));
+                  atom->setFile(file);
+                  stubAtoms_.push_back(atom);
+                  dylibToOrdinal_[file] = ordinal;
+                  dylibSymbolMap_.erase(this->nameFromSymbol(sym));
                 }
               }
             }
@@ -961,6 +965,22 @@ void Parser<A>::parseIndirectSymbolTable() {
       }
       cmd = (const macho_load_command<P> *)(((uint8_t *)cmd) + cmd->cmdsize());
     }
+  }
+
+  for (auto const &x : dylibSymbolMap_) {
+    const macho_nlist<P> *sym = x.second;
+    uint32_t ordinal = GET_LIBRARY_ORDINAL(sym->n_desc());
+    const macho_dylib_command<P> *dylibCommand =
+        dylibLoadCommands_[ordinal - 1];
+    ld::VersionSet platforms;
+    generic::dylib::File *file = new generic::dylib::File(
+        dylibCommand->name(), 0, ld::File::Ordinal::makeArgOrdinal(ordinal),
+        platforms, false, false, false, false, true);
+    generic::dylib::ExportAtom *atom = new generic::dylib::ExportAtom(
+        *file, this->nameFromSymbol(*sym), "", 1,
+        this->weakImportFromSymbol(*sym), false, 0);
+    atom->setFile(file);
+    dylibToOrdinal_[file] = ordinal;
   }
 }
 
@@ -1131,6 +1151,7 @@ void Incremental::openBinary() {
       segmentBoundaries_ = parser.segmentBoundaries();
       sectionBoundaryMap_ = parser.sectionBoundaryMap();
       rebaseInfo_ = parser.rebaseInfo();
+      dylibToOrdinal_ = parser.dylibToOrdinal();
     } break;
 #endif
 #if SUPPORT_ARCH_arm64_32

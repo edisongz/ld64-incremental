@@ -87,7 +87,7 @@ struct GlobalSymbolRefEntry {
 
 /// Incremental patch space
 struct PatchSpace {
-  char sectname[17]; // name of this section
+  char sectname[17];  // name of this section
   uint64_t patchOffset_;
   uint32_t patchSpace_;
 };
@@ -114,9 +114,9 @@ struct SegmentBoundary {
 };
 
 struct SectionBoundary {
-  uint64_t address_;    // section vm address
-  uint64_t fileOffset_; // seciton file offset
-  uint64_t size_;       // section size
+  uint64_t address_;     // section vm address
+  uint64_t fileOffset_;  // seciton file offset
+  uint64_t size_;        // section size
 };
 #pragma pack()
 
@@ -403,11 +403,11 @@ class Incremental {
   constexpr std::vector<IncrFixup> &findRelocations(const char *atomName) {
     return incrFixupsMap_[atomName];
   }
-  
+
   SectionBoundary &sectionBoundary(const char *sectName) {
     return sectionBoundaryMap_[sectName];
   }
-  
+
   constexpr uint64_t sectionStartAddress(const char *sectName) {
     return sectionBoundary(sectName).address_;
   }
@@ -415,11 +415,16 @@ class Incremental {
     return sectionBoundary(sectName).fileOffset_;
   }
   constexpr uint64_t sectionPatchFileOffset(const char *sectName) {
-    return sectionBoundary(sectName).fileOffset_ + patchSpace_[sectName].patchOffset_;
+    return sectionBoundary(sectName).fileOffset_ +
+           patchSpace_[sectName].patchOffset_;
   }
 
   constexpr std::vector<std::pair<uint8_t, uint64_t>> &rebaseInfo() {
     return rebaseInfo_;
+  }
+
+  constexpr std::map<const ld::dylib::File *, int> &dylibToOrdinal() {
+    return dylibToOrdinal_;
   }
 
  private:
@@ -435,6 +440,7 @@ class Incremental {
   std::vector<SegmentBoundary> segmentBoundaries_;
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
+  std::map<const ld::dylib::File *, int> dylibToOrdinal_;
 };
 
 }  // namespace incremental
