@@ -239,6 +239,7 @@ private:
 	void						makeRebasingInfo(ld::Internal& state);
 	void						makeBindingInfo(ld::Internal& state);
 	void						updateLINKEDITAddresses(ld::Internal& state);
+	uint32_t					incrementalPatchSpace(const ld::Internal::FinalSection& sect, uint64_t offset, uint16_t maxAlignment);
 	void						applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::Atom*  atom, uint8_t* buffer);
 	uint64_t					addressOf(const ld::Internal& state, const ld::Fixup* fixup, const ld::Atom** target);
 	uint64_t					addressAndTarget(const ld::Internal& state, const ld::Fixup* fixup, const ld::Atom** target);

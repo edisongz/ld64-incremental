@@ -165,6 +165,7 @@ void OutputFile::dumpAtomsBySection(ld::Internal& state, bool printAtoms)
 void OutputFile::write(ld::Internal& state)
 {
 	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+		this->buildDylibOrdinalMapping(state);
 		_dylibToOrdinal.insert(_incremental.dylibToOrdinal().begin(), _incremental.dylibToOrdinal().end());
 		this->addLinkEdit(state);
 		state.setSectionSizesAndAlignments();
@@ -474,6 +475,10 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 			(const_cast<ld::Atom*>(atom))->setSectionStartAddress(curLinkEditAddress);
 			offset += atom->size();
 		}
+		sect->patchSpaceOffset_ = offset;
+		sect->patchSpaceSize_ = incrementalPatchSpace(*sect, offset, maxAlignment);
+		offset += sect->patchSpaceSize_;
+		
 		sect->size = offset;
 		// section alignment is that of a contained atom with the greatest alignment
 		sect->alignment = maxAlignment;
@@ -489,6 +494,21 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 	_fileSize = state.sections.back()->fileOffset + state.sections.back()->size;
 }
 
+uint32_t OutputFile::incrementalPatchSpace(const ld::Internal::FinalSection &sect, uint64_t offset, uint16_t maxAlignment) {
+	if (_options.enableIncrementalLink()) {
+		if (sect.type() != ld::Section::typeLinkEdit) {
+			return 0;
+		}
+		if (strcmp(sect.sectionName(), "__symbol_table") == 0) {
+			uint64_t alignment = 1 << maxAlignment;
+			uint64_t patch = static_cast<uint64_t>(offset * 0.1);
+			uint32_t incrementalPatchSpace = (patch + (alignment - 1)) & (-alignment);
+			fprintf(stderr, "incremental LINKEDIT section:%s, incremental patch space:%u\n", sect.sectionName(), incrementalPatchSpace);
+			return incrementalPatchSpace;
+		}
+	}
+	return 0;
+}
 
 void OutputFile::setLoadCommandsPadding(ld::Internal& state)
 {
@@ -3695,10 +3715,8 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 	uint64_t baseAddress = _incremental.baseAddress();
 	for (auto sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
 		ld::Internal::FinalSection *sect = *sit;
-		if (sect->isSectionHidden()) {
-			if (strcmp(sect->segmentName(), "__LINKEDIT") == 0) {
-				this->updateLinkEditIncremental(state, sect, wholeBuffer);
-			}
+		if (sect->type() == ld::Section::typeLinkEdit) {
+			this->updateLinkEditIncremental(state, sect, wholeBuffer);
 			continue;
 		}
 		if (takesNoDiskSpace(sect)) {
@@ -4127,7 +4145,7 @@ void OutputFile::writeOutputFileIncremental(ld::Internal &state) {
 }
 
 void OutputFile::updateLinkEditIncremental(ld::Internal &state, ld::Internal::FinalSection *sect, uint8_t *wholeBuffer) {
-	if (strcmp(sect->sectionName(), "__rebase") != 0) {
+	if (strcmp(sect->sectionName(), "__rebase") != 0 && strcmp(sect->sectionName(), "__symbol_table") != 0) {
 		return;
 	}
 	for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
@@ -5974,12 +5992,6 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 				}
 			}
 		}
-	}
-	
-	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
-		needsBinding = false;
-		needsLazyBinding = false;
-		needsWeakBinding = false;
 	}
 
 	// Find the ordinal for the bind target

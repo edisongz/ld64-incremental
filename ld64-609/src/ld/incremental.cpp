@@ -82,8 +82,8 @@ class Parser {
 
   static bool validFile(const uint8_t *fileContent);
 
-  Parser(const uint8_t *fileContent, uint64_t fileLength, const char *path,
-         time_t modTime);
+  Parser(const uint8_t *fileContent, uint64_t fileLength,
+         const Options &options, time_t modTime);
   bool hasValidEntryPoint() const { return entryPoint_ != nullptr; }
   bool canIncrementalUpdate();
   IncrInputMap &incrInputsMap() { return incrInputsMap_; }
@@ -112,18 +112,23 @@ class Parser {
     return dylibToOrdinal_;
   }
 
+  constexpr SymbolSectionOffset &symToSectionOffset() {
+    return symToSectionOffset_;
+  }
+
  private:
   void checkMachOHeader();
   pint_t segStartAddress(uint8_t segIndex);
   bool isStaticExecutable() const;
-  void parseSymbolTable(const macho_load_command<P> *cmd);
+  uint8_t loadCommandSizeMask();
 
+  /// Parse Symbols
+  void parseSymbolTable(const macho_load_command<P> *cmd);
   void parseIndirectSymbolTable();
   uint32_t indirectSymbol(uint32_t indirectIndex) const;
   const macho_nlist<P> &symbolFromIndex(uint32_t index);
   const char *nameFromSymbol(const macho_nlist<P> &sym);
   bool weakImportFromSymbol(const macho_nlist<P> &sym);
-  uint8_t loadCommandSizeMask();
 
   /// Passe segment __TEXT
   void parseTextSegment(const macho_segment_command<P> *segCmd);
@@ -171,6 +176,7 @@ class Parser {
 
   const uint8_t *fileContent_;
   uint32_t fileLength_;
+  const Options &options_;
   uint64_t baseAddress_;
   const macho_header<P> *fHeader_;
   const macho_dyld_info_command<P> *dyldInfo_;
@@ -215,13 +221,16 @@ class Parser {
   /// dylib ordinal map
   std::map<const ld::dylib::File *, int> dylibToOrdinal_;
   std::unordered_map<std::string, const macho_nlist<P> *> dylibSymbolMap_;
+  /// Symbol table section offset
+  SymbolSectionOffset symToSectionOffset_;
 };
 
 template <typename A>
 Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength,
-                  const char *path, time_t modTime)
+                  const Options &options, time_t modTime)
     : fileContent_(fileContent),
       fileLength_(fileLength),
+      options_(options),
       baseAddress_(0),
       fHeader_(nullptr),
       dyldInfo_(nullptr),
@@ -839,12 +848,22 @@ void Parser<A>::parseSymbolTable(const macho_load_command<P> *cmd) {
   if ((symtab->stroff() % 4) != 0) {
     throw "string pool start not pointer aligned";
   }
-
+  // Symbol table
   for (uint32_t i = 0; i < symbolCount_; ++i) {
     const macho_nlist<P> *sym = &symbolTable_[i];
+    const char *symName = this->nameFromSymbol(*sym);
     if ((sym->n_type() & N_TYPE) == N_UNDF && (sym->n_type() & N_EXT) != 0) {
       // dylib symbol
-      dylibSymbolMap_[this->nameFromSymbol(*sym)] = sym;
+      dylibSymbolMap_[symName] = sym;
+    }
+
+    if (symToSectionOffset_.find(sym->n_type()) == symToSectionOffset_.end()) {
+      std::unordered_map<std::string, uint64_t> offsetMap;
+      offsetMap[symName] = i * sizeof(macho_nlist<P>);
+      symToSectionOffset_[sym->n_type()] = offsetMap;
+    } else {
+      auto &offsetMap = symToSectionOffset_[sym->n_type()];
+      offsetMap[symName] = i * sizeof(macho_nlist<P>);
     }
   }
 
@@ -918,11 +937,10 @@ void Parser<A>::parseIndirectSymbolTable() {
                   fprintf(stderr, "sect:%s, stub symbol:%s, %llu, ordinal:%u\n",
                           sect->sectname(), this->nameFromSymbol(sym),
                           (uint64_t)address, ordinal);
-                  ld::VersionSet platforms;
                   generic::dylib::File *file = new generic::dylib::File(
                       dylibCommand->name(), 0,
-                      ld::File::Ordinal::makeArgOrdinal(ordinal), platforms,
-                      false, false, false, false, true);
+                      ld::File::Ordinal::makeArgOrdinal(ordinal),
+                      options_.platforms(), false, false, false, false, true);
                   generic::dylib::ExportAtom *atom =
                       new generic::dylib::ExportAtom(
                           *file, this->nameFromSymbol(sym), "", 1,
@@ -972,10 +990,9 @@ void Parser<A>::parseIndirectSymbolTable() {
     uint32_t ordinal = GET_LIBRARY_ORDINAL(sym->n_desc());
     const macho_dylib_command<P> *dylibCommand =
         dylibLoadCommands_[ordinal - 1];
-    ld::VersionSet platforms;
     generic::dylib::File *file = new generic::dylib::File(
         dylibCommand->name(), 0, ld::File::Ordinal::makeArgOrdinal(ordinal),
-        platforms, false, false, false, false, true);
+        options_.platforms(), false, false, false, false, true);
     generic::dylib::ExportAtom *atom = new generic::dylib::ExportAtom(
         *file, this->nameFromSymbol(*sym), "", 1,
         this->weakImportFromSymbol(*sym), false, 0);
@@ -1101,26 +1118,26 @@ void Incremental::openBinary() {
   switch (_options.architecture()) {
 #if SUPPORT_ARCH_x86_64
     case CPU_TYPE_X86_64: {
-      Parser<x86_64> parser(wholeBuffer_, stat_buf.st_size,
-                            _options.outputFilePath(), stat_buf.st_mtime);
+      Parser<x86_64> parser(wholeBuffer_, stat_buf.st_size, _options,
+                            stat_buf.st_mtime);
     } break;
 #endif
 #if SUPPORT_ARCH_i386
     case CPU_TYPE_I386: {
-      Parser<x86> parser(wholeBuffer_, stat_buf.st_size,
-                         _options.outputFilePath(), stat_buf.st_mtime);
+      Parser<x86> parser(wholeBuffer_, stat_buf.st_size, _options,
+                         stat_buf.st_mtime);
     } break;
 #endif
 #if SUPPORT_ARCH_arm_any
     case CPU_TYPE_ARM: {
-      Parser<arm> parser(wholeBuffer_, stat_buf.st_size,
-                         _options.outputFilePath(), stat_buf.st_mtime);
+      Parser<arm> parser(wholeBuffer_, stat_buf.st_size, _options,
+                         stat_buf.st_mtime);
     } break;
 #endif
 #if SUPPORT_ARCH_arm64
     case CPU_TYPE_ARM64: {
-      Parser<arm64> parser(wholeBuffer_, stat_buf.st_size,
-                           _options.outputFilePath(), stat_buf.st_mtime);
+      Parser<arm64> parser(wholeBuffer_, stat_buf.st_size, _options,
+                           stat_buf.st_mtime);
       if (parser.hasValidEntryPoint()) {
         _options.markIgnoreEntryPoint();
       }
@@ -1152,12 +1169,13 @@ void Incremental::openBinary() {
       sectionBoundaryMap_ = parser.sectionBoundaryMap();
       rebaseInfo_ = parser.rebaseInfo();
       dylibToOrdinal_ = parser.dylibToOrdinal();
+      symToSectionOffset_ = parser.symToSectionOffset();
     } break;
 #endif
 #if SUPPORT_ARCH_arm64_32
     case CPU_TYPE_ARM64_32: {
-      Parser<arm64_32> parser(wholeBuffer_, stat_buf.st_size,
-                              _options.outputFilePath(), stat_buf.st_mtime);
+      Parser<arm64_32> parser(wholeBuffer_, stat_buf.st_size, _options,
+                              stat_buf.st_mtime);
     } break;
 #endif
   }

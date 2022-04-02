@@ -743,6 +743,31 @@ uint64_t SymbolTableAtom<A>::size() const
 template <typename A>
 void SymbolTableAtom<A>::copyRawContent(uint8_t buffer[]) const
 {
+	if (_options.validIncrementalUpdate()) {
+		ld::incremental::Incremental &incremental = this->_writer.incremental();
+		for (auto it = _locals.begin(); it != _locals.end(); ++it) {
+			const char *symbolName = this->_writer._stringPoolAtom->stringForIndex(it->n_strx());
+			if (strcmp(symbolName, "__dyld_private") == 0) {
+				continue;
+			}
+			uint64_t sectionOffset = incremental.symSectionOffset(it->n_type(), symbolName);
+			macho_nlist<P> *local = (macho_nlist<P> *)&buffer[sectionOffset];
+			local->set_n_value(it->n_value());
+		}
+		
+		for (auto it = _globals.begin(); it != _globals.end(); ++it) {
+			const char *symbolName = this->_writer._stringPoolAtom->stringForIndex(it->n_strx());
+			if (strcmp(symbolName, "__mh_execute_header") == 0) {
+				continue;
+			}
+			uint64_t sectionOffset = incremental.symSectionOffset(it->n_type(), symbolName);
+			macho_nlist<P> *global = (macho_nlist<P> *)&buffer[sectionOffset];
+			global->set_n_value(it->n_value());
+		}
+		// No need to update imports
+		return;
+	}
+	
 	memcpy(&buffer[this->_writer._localSymbolsStartIndex*sizeof(macho_nlist<P>)], &_locals[0], 
 												this->_writer._localSymbolsCount*sizeof(macho_nlist<P>));
 	memcpy(&buffer[this->_writer._globalSymbolsStartIndex*sizeof(macho_nlist<P>)], &_globals[0],

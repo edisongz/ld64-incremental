@@ -379,6 +379,8 @@ class IncrementalCommand {
 };
 
 using IncrFixupsMap = std::unordered_map<std::string, std::vector<IncrFixup>>;
+using SymbolSectionOffset =
+    std::unordered_map<uint8_t, std::unordered_map<std::string, uint64_t>>;
 
 class Incremental {
  public:
@@ -427,6 +429,11 @@ class Incremental {
     return dylibToOrdinal_;
   }
 
+  constexpr uint64_t symSectionOffset(uint8_t type, const char *symbol) {
+    auto &offsetMap = symToSectionOffset_[type];
+    return offsetMap[symbol];
+  }
+
  private:
   Options &_options;
   int fd_;
@@ -441,6 +448,7 @@ class Incremental {
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
   std::map<const ld::dylib::File *, int> dylibToOrdinal_;
+  SymbolSectionOffset symToSectionOffset_;
 };
 
 }  // namespace incremental
