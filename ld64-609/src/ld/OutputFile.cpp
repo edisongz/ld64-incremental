@@ -174,17 +174,30 @@ void OutputFile::write(ld::Internal& state)
 		_incremental.forEachRebaseInfo([&](std::pair<uint8_t, uint64_t> item) {
 			_rebaseInfo.push_back(RebaseInfo(item.first, item.second));
 		});
+		_incremental.forEachBindingInfo([&](ld::incremental::BindingInfoTuple &info) {
+			uint8_t type;
+			int ordi;
+			const char *symbol;
+			bool weakImport;
+			uint64_t address;
+			int64_t addend;
+			std::tie(type, ordi, symbol, weakImport, address, addend) = info;
+			_bindingInfo.push_back(BindingInfo(type, ordi, symbol, weakImport, address, addend));
+		});
 		this->generateLinkEditInfo(state);
 //		this->updateLINKEDITAddresses(state);
 		
 		if ( _options.makeCompressedDyldInfo() || state.cantUseChainedFixups) {
 			// build dylb rebasing info
-			assert(_rebasingInfoAtom != NULL);
+			assert(_rebasingInfoAtom != nullptr);
 			_rebasingInfoAtom->encode();
+			// build dyld binding info
+			assert(_bindingInfoAtom != nullptr);
+			_bindingInfoAtom->encode();
 		}
 		
 		// build classic symbol table
-		assert(_symbolTableAtom != NULL);
+		assert(_symbolTableAtom != nullptr);
 		_symbolTableAtom->encode();
 //		assert(_indirectSymbolTableAtom != NULL);
 //		_indirectSymbolTableAtom->encode();
@@ -195,7 +208,9 @@ void OutputFile::write(ld::Internal& state)
 			if (sect->type() != ld::Section::typeLinkEdit) {
 				continue;
 			}
-			if (strcmp(sect->sectionName(), "__rebase") != 0 && strcmp(sect->sectionName(), "__symbol_table") != 0) {
+			if (strcmp(sect->sectionName(), "__rebase") != 0 &&
+				strcmp(sect->sectionName(), "__binding") != 0 &&
+				strcmp(sect->sectionName(), "__symbol_table") != 0) {
 				continue;
 			}
 			uint64_t curLinkEditAddress = _incremental.sectionStartAddress(sect->sectionName());
@@ -499,9 +514,13 @@ uint32_t OutputFile::incrementalPatchSpace(const ld::Internal::FinalSection &sec
 		if (sect.type() != ld::Section::typeLinkEdit) {
 			return 0;
 		}
-		if (strcmp(sect.sectionName(), "__symbol_table") == 0) {
+		
+		if (strcmp(sect.sectionName(), "__symbol_table") == 0 ||
+			strcmp(sect.sectionName(), "__binding") == 0 ||
+			strcmp(sect.sectionName(), "__weak_binding") == 0 ||
+			strcmp(sect.sectionName(), "__lazy_binding") == 0) {
 			uint64_t alignment = 1 << maxAlignment;
-			uint64_t patch = static_cast<uint64_t>(offset * 0.1);
+			uint64_t patch = static_cast<uint64_t>(offset);
 			uint32_t incrementalPatchSpace = (patch + (alignment - 1)) & (-alignment);
 			fprintf(stderr, "incremental LINKEDIT section:%s, incremental patch space:%u\n", sect.sectionName(), incrementalPatchSpace);
 			return incrementalPatchSpace;
@@ -4145,7 +4164,9 @@ void OutputFile::writeOutputFileIncremental(ld::Internal &state) {
 }
 
 void OutputFile::updateLinkEditIncremental(ld::Internal &state, ld::Internal::FinalSection *sect, uint8_t *wholeBuffer) {
-	if (strcmp(sect->sectionName(), "__rebase") != 0 && strcmp(sect->sectionName(), "__symbol_table") != 0) {
+	if (strcmp(sect->sectionName(), "__rebase") != 0 &&
+		strcmp(sect->sectionName(), "__binding") != 0 &&
+		strcmp(sect->sectionName(), "__symbol_table") != 0) {
 		return;
 	}
 	for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
@@ -6050,6 +6071,7 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 		if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
 			if (strcmp(sect->sectionName(), "__cfstring") == 0 ||
 				strcmp(sect->sectionName(), "__objc_const") == 0 ||
+				strcmp(sect->sectionName(), "__objc_selrefs") == 0 ||
 				strcmp(sect->sectionName(), "__objc_superrefs") == 0 ||
 				strcmp(sect->sectionName(), "__objc_data") == 0) {
 				_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
@@ -6074,7 +6096,14 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 			}
 			_hasUnalignedFixup = true;
 		}
-		_bindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, address, addend));
+		
+		if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+			if (strcmp(sect->sectionName(), "__got") != 0) {
+				_bindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, address, addend));
+			}
+		} else {
+			_bindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, address, addend));
+		}
 	}
 	if ( needsLazyBinding ) {
 		if ( _options.bindAtLoad() )

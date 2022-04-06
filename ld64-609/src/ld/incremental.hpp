@@ -6,8 +6,8 @@
 //  Copyright © 2022 Apple Inc. All rights reserved.
 //
 
-#ifndef incremental_hpp
-#define incremental_hpp
+#ifndef __INCREMENTAL_HPP__
+#define __INCREMENTAL_HPP__
 
 #include <AvailabilityMacros.h>
 #include <dlfcn.h>
@@ -32,12 +32,11 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "InputFiles.h"
-#include "Options.h"
 #include "configure.h"
-#include "ld.hpp"
 
 #define LC_INCREMENTAL 0x41
 
@@ -381,6 +380,8 @@ class IncrementalCommand {
 using IncrFixupsMap = std::unordered_map<std::string, std::vector<IncrFixup>>;
 using SymbolSectionOffset =
     std::unordered_map<uint8_t, std::unordered_map<std::string, uint64_t>>;
+using BindingInfoTuple =
+    std::tuple<uint8_t, int, const char *, bool, uint64_t, int64_t>;
 
 class Incremental {
  public:
@@ -402,6 +403,8 @@ class Incremental {
       const std::function<void(SegmentBoundary &, uint32_t)> &handler);
   void forEachRebaseInfo(
       const std::function<void(std::pair<uint8_t, uint64_t> &)> &handler);
+  void forEachBindingInfo(
+      const std::function<void(BindingInfoTuple &)> &handler);
   constexpr std::vector<IncrFixup> &findRelocations(const char *atomName) {
     return incrFixupsMap_[atomName];
   }
@@ -447,6 +450,7 @@ class Incremental {
   std::vector<SegmentBoundary> segmentBoundaries_;
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
+  std::vector<BindingInfoTuple> bindingInfo_;
   std::map<const ld::dylib::File *, int> dylibToOrdinal_;
   SymbolSectionOffset symToSectionOffset_;
 };
@@ -454,4 +458,4 @@ class Incremental {
 }  // namespace incremental
 }  // namespace ld
 
-#endif /* incremental_hpp */
+#endif  // __INCREMENTAL_HPP__

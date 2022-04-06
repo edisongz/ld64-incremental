@@ -2696,7 +2696,7 @@ template <typename A>
 void IncrementalPatchSpaceAtom<A>::encode() const {
 	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); ++sit) {
 		ld::Internal::FinalSection *sect = *sit;
-		bool isRebaseSection = (strcmp(sect->sectionName(), "__rebase") == 0);
+		bool isRebaseSection = (strcmp(sect->sectionName(), "__rebase") == 0 || strcmp(sect->sectionName(), "__binding") == 0);
 		if (!isRebaseSection && sect->isSectionHidden()) {
 			continue;
 		}

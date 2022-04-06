@@ -35,6 +35,21 @@ static uint64_t read_uleb128(const uint8_t *&p, const uint8_t *end) {
   return result;
 }
 
+static int64_t read_sleb128(const uint8_t *&p, const uint8_t *end) {
+  int64_t result = 0;
+  int bit = 0;
+  uint8_t byte;
+  do {
+    if (p == end) throwf("malformed sleb128");
+    byte = *p++;
+    result |= (((int64_t)(byte & 0x7f)) << bit);
+    bit += 7;
+  } while (byte & 0x80);
+  // sign extend negative numbers
+  if (((byte & 0x40) != 0) && (bit < 64)) result |= (-1LL) << bit;
+  return result;
+}
+
 template <typename A>
 class ObjCClass {
  public:
@@ -108,6 +123,10 @@ class Parser {
     return rebaseInfo_;
   }
 
+  constexpr std::vector<BindingInfoTuple> &bindingInfo() {
+    return bindingInfo_;
+  }
+
   constexpr std::map<const ld::dylib::File *, int> &dylibToOrdinal() {
     return dylibToOrdinal_;
   }
@@ -145,6 +164,11 @@ class Parser {
 
   /// Parse dynamic loader info
   void parseDyldInfoSegment(const macho_dyld_info_command<P> *segCmd);
+  /// Parse __rebase section
+  void parseRebaseSection(const macho_dyld_info_command<P> *segCmd);
+  /// Parse __binding section
+  void parseBindingSection(const macho_dyld_info_command<P> *segCmd,
+                           bool weakBinding);
 
   /// Parse Incremental sections
   void parseIncrementalSections();
@@ -216,6 +240,12 @@ class Parser {
   std::vector<SegmentBoundary> segmentBoundaries_;
   /// Dyld rebase info
   std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
+  /// Dyld binding info
+  std::vector<BindingInfoTuple> bindingInfo_;
+  /// Dyld weak binding info
+  std::vector<BindingInfoTuple> weakBindingInfo_;
+  /// Dyld lazy binding info
+  std::vector<BindingInfoTuple> lazyBindingInfo_;
   /// LOAD_DYLIB
   std::vector<const macho_dylib_command<P> *> dylibLoadCommands_;
   /// dylib ordinal map
@@ -610,7 +640,14 @@ void Parser<A>::parseObjCData(const macho_section<P> *sect) {
 
 template <typename A>
 void Parser<A>::parseDyldInfoSegment(const macho_dyld_info_command<P> *segCmd) {
-  if (!segCmd) {
+  this->parseRebaseSection(segCmd);
+  this->parseBindingSection(segCmd, false);
+  this->parseBindingSection(segCmd, true);
+}
+
+template <typename A>
+void Parser<A>::parseRebaseSection(const macho_dyld_info_command<P> *segCmd) {
+  if (!segCmd || segCmd->rebase_off() == 0) {
     return;
   }
   const uint32_t rebasePatchOffset =
@@ -686,6 +723,138 @@ void Parser<A>::parseDyldInfoSegment(const macho_dyld_info_command<P> *segCmd) {
         break;
       default:
         throwf("bad rebase opcode %d", *p);
+    }
+  }
+}
+
+template <typename A>
+void Parser<A>::parseBindingSection(const macho_dyld_info_command<P> *segCmd,
+                                    bool weakbinding) {
+  if (!segCmd) {
+    printf("no compressed binding info\n");
+    return;
+  } else if (!weakbinding && (segCmd->bind_off() == 0)) {
+    printf("no compressed binding info\n");
+    return;
+  } else if (weakbinding && (segCmd->weak_bind_off() == 0)) {
+    printf("no compressed weak binding info\n");
+    return;
+  }
+
+  const uint8_t *start;
+  const uint8_t *end;
+  if (weakbinding) {
+    printf("weak binding opcodes:\n");
+    start = (uint8_t *)fHeader_ + segCmd->weak_bind_off();
+    end = &start[segCmd->weak_bind_size()];
+  } else {
+    printf("binding opcodes:\n");
+    start = (uint8_t *)fHeader_ + segCmd->bind_off();
+    end = &start[segCmd->bind_size()];
+
+    SectionBoundary sectionBoundary;
+    sectionBoundary.address_ = baseAddress() + segCmd->bind_off();
+    sectionBoundary.fileOffset_ = segCmd->bind_off();
+    sectionBoundary.size_ = segCmd->bind_size();
+    sectionBoundaryMap_["__binding"] = sectionBoundary;
+  }
+  const uint8_t *p = start;
+  uint8_t type = 0;
+  uint8_t flags;
+  uint64_t address = baseAddress_;
+  const char *symbolName = nullptr;
+  int libraryOrdinal = 0;
+  int64_t addend = 0;
+  uint32_t segmentIndex = 0;
+  uint32_t count;
+  uint32_t skip;
+  bool weakImport = false;
+  bool done = false;
+  while (!done && (p < end)) {
+    uint8_t immediate = *p & BIND_IMMEDIATE_MASK;
+    uint8_t opcode = *p & BIND_OPCODE_MASK;
+    uint32_t opcodeOffset = p - start;
+    ++p;
+    switch (opcode) {
+      case BIND_OPCODE_DONE:
+        done = true;
+        break;
+      case BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
+        libraryOrdinal = immediate;
+        break;
+      case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
+        libraryOrdinal = read_uleb128(p, end);
+        break;
+      case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
+        // the special ordinals are negative numbers
+        if (immediate == 0) {
+          libraryOrdinal = 0;
+        } else {
+          int8_t signExtended = BIND_OPCODE_MASK | immediate;
+          libraryOrdinal = signExtended;
+        }
+        break;
+      case BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
+        flags = immediate & BIND_SYMBOL_FLAGS_WEAK_IMPORT;
+        symbolName = (char *)p;
+        while (*p != '\0') ++p;
+        ++p;
+        weakImport = (flags != 0);
+        break;
+      case BIND_OPCODE_SET_TYPE_IMM:
+        type = immediate;
+        break;
+      case BIND_OPCODE_SET_ADDEND_SLEB:
+        addend = read_sleb128(p, end);
+        break;
+      case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+        segmentIndex = immediate;
+        address = this->segStartAddress(segmentIndex) + read_uleb128(p, end);
+        break;
+      case BIND_OPCODE_ADD_ADDR_ULEB: {
+        uint64_t val = read_uleb128(p, end);
+        address += val;
+      } break;
+      case BIND_OPCODE_DO_BIND:
+        bindingInfo_.push_back(std::make_tuple(type, libraryOrdinal, symbolName,
+                                               weakImport, address, addend));
+        address += sizeof(pint_t);
+        break;
+      case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
+        skip = read_uleb128(p, end);
+        bindingInfo_.push_back(std::make_tuple(type, libraryOrdinal, symbolName,
+                                               weakImport, address, addend));
+        address += sizeof(pint_t) + skip;
+        break;
+      case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
+        skip = immediate * sizeof(pint_t) + sizeof(pint_t);
+        bindingInfo_.push_back(std::make_tuple(type, libraryOrdinal, symbolName,
+                                               weakImport, address, addend));
+        address += skip;
+        break;
+      case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
+        count = read_uleb128(p, end);
+        skip = read_uleb128(p, end);
+        for (uint32_t i = 0; i < count; ++i) {
+          bindingInfo_.push_back(std::make_tuple(
+              type, libraryOrdinal, symbolName, weakImport, address, addend));
+          address += sizeof(pint_t) + skip;
+        }
+        break;
+      case BIND_OPCODE_THREADED:
+        // Note the immediate is a sub opcode
+        switch (immediate) {
+          case BIND_SUBOPCODE_THREADED_SET_BIND_ORDINAL_TABLE_SIZE_ULEB:
+            count = read_uleb128(p, end);
+            break;
+          case BIND_SUBOPCODE_THREADED_APPLY:
+            break;
+          default:
+            throwf("unknown threaded bind subopcode %d", immediate);
+        }
+        break;
+      default:
+        throwf("unknown bind opcode %d", *p);
     }
   }
 }
@@ -1042,7 +1211,7 @@ static void removePathAndExit(int sig) {
       ::unlink(path);
   }
   fprintf(stderr, "ld: interrupted\n");
-  // we are in a sig handler, don't do clean ups
+  // we are in a sig handler, don't do clean uprintfps
   _exit(1);
 }
 
@@ -1168,6 +1337,7 @@ void Incremental::openBinary() {
       segmentBoundaries_ = parser.segmentBoundaries();
       sectionBoundaryMap_ = parser.sectionBoundaryMap();
       rebaseInfo_ = parser.rebaseInfo();
+      bindingInfo_ = parser.bindingInfo();
       dylibToOrdinal_ = parser.dylibToOrdinal();
       symToSectionOffset_ = parser.symToSectionOffset();
     } break;
@@ -1210,6 +1380,13 @@ void Incremental::forEachSegmentBoundary(
 void Incremental::forEachRebaseInfo(
     const std::function<void(std::pair<uint8_t, uint64_t> &)> &handler) {
   for (auto it = rebaseInfo_.begin(); it != rebaseInfo_.end(); ++it) {
+    handler(*it);
+  }
+}
+
+void Incremental::forEachBindingInfo(
+    const std::function<void(BindingInfoTuple &)> &handler) {
+  for (auto it = bindingInfo_.begin(); it != bindingInfo_.end(); ++it) {
     handler(*it);
   }
 }
