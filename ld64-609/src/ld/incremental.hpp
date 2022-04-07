@@ -391,8 +391,8 @@ class Incremental {
   void openBinary();
   void closeBinary();
   constexpr uint64_t baseAddress() const { return baseAddress_; }
-  constexpr uint32_t objcClassOffset(const char *className) {
-    return objcClassIndexMap_[className];
+  constexpr uint32_t objcClassSectionOffset(const char *className) {
+    return objcClassSectionOffsetMap_[className];
   }
   constexpr PatchSpace &patchSpace(const char *sectName) {
     return patchSpace_[sectName];
@@ -442,8 +442,8 @@ class Incremental {
   int fd_;
   uint64_t baseAddress_;
   uint8_t *wholeBuffer_;
-  /// ObjC class index map
-  std::unordered_map<const char *, uint32_t> objcClassIndexMap_;
+  /// ObjC class section offset map
+  std::unordered_map<std::string, uint32_t> objcClassSectionOffsetMap_;
   IncrFixupsMap incrFixupsMap_;
   std::unordered_map<std::string, PatchSpace> patchSpace_;
   std::vector<const ld::Atom *> stubAtoms_;

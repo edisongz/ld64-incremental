@@ -102,7 +102,7 @@ class Parser {
   bool hasValidEntryPoint() const { return entryPoint_ != nullptr; }
   bool canIncrementalUpdate();
   IncrInputMap &incrInputsMap() { return incrInputsMap_; }
-  constexpr std::unordered_map<const char *, uint32_t> &objcClassIndexMap() {
+  constexpr std::unordered_map<std::string, uint32_t> &objcClassIndexMap() {
     return objcClassIndexMap_;
   }
   constexpr IncrFixupsMap &incrFixupsMap() { return incrFixupsMap_; }
@@ -229,8 +229,9 @@ class Parser {
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   /// ObjC class address
   std::vector<uint64_t> objcClassAddresses_;
+  std::unordered_map<uint64_t, uint32_t> objcClassSectionOffsetMap_;
   /// ObjC class index map
-  std::unordered_map<const char *, uint32_t> objcClassIndexMap_;
+  std::unordered_map<std::string, uint32_t> objcClassIndexMap_;
 
   /// Incremental fixups map
   IncrFixupsMap incrFixupsMap_;
@@ -591,7 +592,9 @@ void Parser<A>::parseObjcClassList(const macho_section<P> *sect) {
   const uint64_t *p = (const uint64_t *)((uint8_t *)fHeader_ + sect->offset());
   uint32_t entryCount = sect->size() / sizeof(pint_t);
   for (uint32_t i = 0; i < entryCount; i++) {
-    objcClassAddresses_.push_back(E::get64(*p++));
+    uint64_t objcClassAddress = E::get64(*p++);
+    objcClassAddresses_.push_back(objcClassAddress);
+    objcClassSectionOffsetMap_[objcClassAddress] = i * sizeof(pint_t);
   }
 }
 
@@ -634,7 +637,7 @@ void Parser<A>::parseObjCData(const macho_section<P> *sect) {
         E::get64(*objcClassNamePtr) - baseAddress();
     const char *objcClassName =
         (const char *)((uint8_t *)fHeader_ + objcClassNameOffset);
-    objcClassIndexMap_[objcClassName] = offset;
+    objcClassIndexMap_[objcClassName] = objcClassSectionOffsetMap_[*ait];
   }
 }
 
@@ -773,7 +776,6 @@ void Parser<A>::parseBindingSection(const macho_dyld_info_command<P> *segCmd,
   while (!done && (p < end)) {
     uint8_t immediate = *p & BIND_IMMEDIATE_MASK;
     uint8_t opcode = *p & BIND_OPCODE_MASK;
-    uint32_t opcodeOffset = p - start;
     ++p;
     switch (opcode) {
       case BIND_OPCODE_DONE:
@@ -1329,7 +1331,7 @@ void Incremental::openBinary() {
         incrementalFiles.insert((*it).path);
       }
       _options.removeIncrementalInputFiles(incrementalFiles);
-      objcClassIndexMap_ = parser.objcClassIndexMap();
+      objcClassSectionOffsetMap_ = parser.objcClassIndexMap();
       patchSpace_ = parser.patchSpaceMap();
       stubAtoms_ = parser.stubAtoms();
       incrFixupsMap_ = parser.incrFixupsMap();

@@ -2700,7 +2700,11 @@ void IncrementalPatchSpaceAtom<A>::encode() const {
 		if (!isRebaseSection && sect->isSectionHidden()) {
 			continue;
 		}
-		if (strcmp(sect->segmentName(), "__TEXT") == 0 || strcmp(sect->segmentName(), "__DATA") == 0 || strcmp(sect->sectionName(), "__cfstring") == 0 || isRebaseSection) {
+		if (strcmp(sect->segmentName(), "__TEXT") == 0 ||
+			strcmp(sect->segmentName(), "__DATA") == 0 ||
+			strcmp(sect->sectionName(), "__got") == 0 ||
+			strcmp(sect->sectionName(), "__cfstring") == 0 ||
+			strcmp(sect->sectionName(), "__objc_imageinfo") == 0 || isRebaseSection) {
 			ld::incremental::PatchSpaceSectionEntry<P> entry;
 			entry.setSectname(sect->sectionName());
 			entry.setPatchOffset(sect->patchSpaceOffset_);

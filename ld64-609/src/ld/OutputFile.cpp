@@ -330,12 +330,13 @@ void OutputFile::assignAtomAddresses(ld::Internal& state)
 
 void OutputFile::assignIncrementalAtomAddresses(ld::Internal &state) {
 	const bool log = false;
-	if ( log ) fprintf(stderr, "assignAtomAddresses()\n");
+	if ( log ) fprintf(stderr, "assignIncrementalAtomAddresses()\n");
 	for (auto sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
-		ld::Internal::FinalSection* sect = *sit;
+		ld::Internal::FinalSection *sect = *sit;
+		bool isObjCClassListSection = (strcmp(sect->sectionName(), "__objc_classlist") == 0);
 		if ( log ) fprintf(stderr, "  section=%s/%s\n", sect->segmentName(), sect->sectionName());
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
-			const ld::Atom* atom = *ait;
+			const ld::Atom *atom = *ait;
 			switch ( sect-> type() ) {
 				case ld::Section::typeImportProxies:
 					// want finalAddress() of all proxy atoms to be zero
@@ -349,13 +350,11 @@ void OutputFile::assignIncrementalAtomAddresses(ld::Internal &state) {
 					// linkedit layout is assigned later
 					break;
 				default:
-					bool isStubSection = (strcmp(sect->sectionName(), "__stubs") == 0 || strcmp(sect->sectionName(), "__stub_helper") == 0);
 					uint64_t sectionStartAddress = _incremental.sectionStartAddress(sect->sectionName()) + _incremental.patchSpace(sect->sectionName()).patchOffset_;
-					if (isStubSection) {
-						// ignore patch space
+					if (isObjCClassListSection) {
 						sectionStartAddress = _incremental.sectionStartAddress(sect->sectionName());
 					}
-					(const_cast<ld::Atom*>(atom))->setSectionStartAddress(sectionStartAddress);
+					(const_cast<ld::Atom *>(atom))->setSectionStartAddress(sectionStartAddress);
 					if ( log ) fprintf(stderr, "    atom=%p, addr=0x%08llX, name=%s\n", atom, atom->finalAddress(), atom->name());
 					break;
 			}
@@ -3731,6 +3730,7 @@ void OutputFile::writeAtoms(ld::Internal& state, uint8_t* wholeBuffer)
 void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer) {
 	uint64_t fileOffsetOfEndOfLastAtom = 0;
 	bool lastAtomUsesNoOps = false;
+	std::vector<const char *> objcClassNames;
 	uint64_t baseAddress = _incremental.baseAddress();
 	for (auto sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
 		ld::Internal::FinalSection *sect = *sit;
@@ -3741,17 +3741,9 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 		if (takesNoDiskSpace(sect)) {
 			continue;
 		}
-		
-		if (strcmp(sect->sectionName(), "__objc_classname") == 0) {
-			fprintf(stderr, "\n");
-			for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
-				const ld::Atom *atom = *ait;
-				fprintf(stderr, "classname:%s\n", (const char *)atom->rawContentPointer());
-			}
-		}
-		
 		const bool sectionUsesNops = (sect->type() == ld::Section::typeCode);
 		bool lastAtomWasThumb = false;
+		bool isObjCClassNameSection = (strcmp(sect->sectionName(), "__objc_classname") == 0);
 		// Section __objc_classlist
 		bool isObjCClassListSection = (strcmp(sect->sectionName(), "__objc_classlist") == 0);
 		ld::incremental::PatchSpace patchSpace = _incremental.patchSpace(sect->sectionName());
@@ -3759,6 +3751,9 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 		uint32_t freeSpace = patchSpace.patchSpace_;
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 			ld::Atom *atom = const_cast<ld::Atom *>(*ait);
+			if (isObjCClassNameSection) {
+				objcClassNames.push_back((const char *)atom->rawContentPointer());
+			}
 			if (atom->definition() == ld::Atom::definitionProxy) {
 				continue;
 			}
@@ -3768,6 +3763,10 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 			try {
 				if (!isObjCClassListSection && (freeSpace <= 0 || atom->size() > freeSpace)) {
 					continue;
+				}
+				if (isObjCClassListSection) {
+					uint64_t sectionOffset = _incremental.objcClassSectionOffset(objcClassNames[std::distance(ait, sect->atoms.begin())]);
+					patchFileOffset += sectionOffset;
 				}
 				// check for alignment padding between atoms
 				if ((patchFileOffset != fileOffsetOfEndOfLastAtom) && lastAtomUsesNoOps) {

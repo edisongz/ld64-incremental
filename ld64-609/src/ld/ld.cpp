@@ -1196,7 +1196,11 @@ uint32_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection &
 		if (sect.isSectionHidden()) {
 			return 0;
 		}
-		if (strcmp(sect.segmentName(), "__TEXT") == 0 || strcmp(sect.segmentName(), "__DATA") == 0 || strcmp(sect.sectionName(), "__cfstring") == 0) {
+		if (strcmp(sect.segmentName(), "__TEXT") == 0 ||
+			strcmp(sect.segmentName(), "__DATA") == 0 ||
+			strcmp(sect.sectionName(), "__got") == 0 ||
+			strcmp(sect.sectionName(), "__cfstring") == 0 ||
+			strcmp(sect.sectionName(), "__objc_imageinfo") == 0) {
 			uint64_t alignment = 1 << maxAlignment;
 			uint64_t patch = static_cast<uint64_t>(offset * 0.3);
 			if (strcmp(sect.sectionName(), "__cstring") == 0 ||
