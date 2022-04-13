@@ -440,6 +440,16 @@ void Pass::process(ld::Internal& state, ld::incremental::Incremental &incrementa
 		incremental.forEachStubAtom([&](const ld::Atom *atom) {
 			stubFor[atom] = makeStub(*atom, weakImportMap[atom]);
 		});
+		// make stub atoms
+		for (auto it = stubFor.begin(); it != stubFor.end(); ++it) {
+			const ld::Atom *atom = &(*it->first);
+			if (incremental.containsStubName(atom->name())) {
+				continue;
+			}
+			if (!it->second) {
+				it->second = makeStub(*it->first, weakImportMap[it->first]);
+			}
+		}
 	} else {
 		// make stub atoms
 		for (std::map<const ld::Atom*,ld::Atom*>::iterator it = stubFor.begin(); it != stubFor.end(); ++it) {

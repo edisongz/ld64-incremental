@@ -125,6 +125,14 @@ uint64_t StringPoolAtom::size() const
 
 void StringPoolAtom::copyRawContent(uint8_t buffer[]) const
 {
+	if (_options.validIncrementalUpdate()) {
+		uint64_t offset = 0;
+		_writer.incremental().forEachAppendedString([&](const std::string &str){
+			memcpy(&buffer[offset], str.c_str(), str.size());
+			offset += str.size();
+		});
+		return;
+	}
 	uint64_t offset = 0;
 	for (unsigned int i=0; i < _fullBuffers.size(); ++i) {
 		memcpy(&buffer[offset], _fullBuffers[i], kBufferSize);
@@ -140,6 +148,9 @@ void StringPoolAtom::copyRawContent(uint8_t buffer[]) const
 int32_t StringPoolAtom::add(const char* str)
 {
 	int32_t offset = kBufferSize * _fullBuffers.size() + _currentBufferUsed;
+	if (_options.validIncrementalUpdate()) {
+		_writer.incremental().addUnique(str);
+	}
 	int lenNeeded = strlcpy(&_currentBuffer[_currentBufferUsed], str, kBufferSize-_currentBufferUsed)+1;
 	if ( (_currentBufferUsed+lenNeeded) < kBufferSize ) {
 		_currentBufferUsed += lenNeeded;
@@ -764,7 +775,21 @@ void SymbolTableAtom<A>::copyRawContent(uint8_t buffer[]) const
 			macho_nlist<P> *global = (macho_nlist<P> *)&buffer[sectionOffset];
 			global->set_n_value(it->n_value());
 		}
-		// No need to update imports
+		
+		std::vector<macho_nlist<P>> incrmentalImports;
+		uint32_t prevOffset = 0;
+		for (auto it = _imports.begin(); it != _imports.end(); ++it) {
+			const char *symbolName = this->_writer._stringPoolAtom->stringForIndex(it->n_strx());
+			uint64_t sectionOffset = incremental.symSectionOffset(it->n_type(), symbolName);
+			if (sectionOffset == ULONG_MAX) {
+				uint32_t index = incremental.symbolIndexInStrings(symbolName);
+				it->set_n_strx(index);
+				incrmentalImports.push_back(*it);
+			} else {
+				prevOffset = sectionOffset;
+			}
+		}
+		memcpy(&buffer[prevOffset + sizeof(macho_nlist<P>)], &incrmentalImports[0], incrmentalImports.size() * sizeof(macho_nlist<P>));
 		return;
 	}
 	
@@ -2378,6 +2403,12 @@ ld::Section IndirectSymbolTableAtom<A>::_s_section("__LINKEDIT", "__ind_sym_tab"
 template <typename A>
 uint32_t IndirectSymbolTableAtom<A>::symbolIndex(const ld::Atom* atom)
 {
+	if (_options.validIncrementalUpdate()) {
+		uint64_t sectionOffset = _writer.incremental().symSectionOffset((N_UNDF | N_EXT), atom->name());
+		uint32_t pos = sectionOffset / sizeof(macho_nlist<P>);
+		printf("2 indirect symbol name:%s %u\n", atom->name(), pos);
+		return pos;
+	}
 	std::map<const ld::Atom*, uint32_t>::iterator pos = this->_writer._atomToSymbolIndex.find(atom);
 	if ( pos != this->_writer._atomToSymbolIndex.end() )
 		return pos->second;

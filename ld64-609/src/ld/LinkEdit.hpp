@@ -2696,15 +2696,15 @@ template <typename A>
 void IncrementalPatchSpaceAtom<A>::encode() const {
 	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); ++sit) {
 		ld::Internal::FinalSection *sect = *sit;
-		bool isRebaseSection = (strcmp(sect->sectionName(), "__rebase") == 0 || strcmp(sect->sectionName(), "__binding") == 0);
-		if (!isRebaseSection && sect->isSectionHidden()) {
+		bool isLinkEditSegment = (sect->type() == ld::Section::typeLinkEdit);
+		if (!isLinkEditSegment && sect->isSectionHidden()) {
 			continue;
 		}
 		if (strcmp(sect->segmentName(), "__TEXT") == 0 ||
 			strcmp(sect->segmentName(), "__DATA") == 0 ||
 			strcmp(sect->sectionName(), "__got") == 0 ||
 			strcmp(sect->sectionName(), "__cfstring") == 0 ||
-			strcmp(sect->sectionName(), "__objc_imageinfo") == 0 || isRebaseSection) {
+			strcmp(sect->sectionName(), "__objc_imageinfo") == 0 || isLinkEditSegment) {
 			ld::incremental::PatchSpaceSectionEntry<P> entry;
 			entry.setSectname(sect->sectionName());
 			entry.setPatchOffset(sect->patchSpaceOffset_);

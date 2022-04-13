@@ -399,6 +399,9 @@ class Incremental {
   }
   void forEachStubAtom(ld::File::AtomHandler &handler, ld::Internal &state);
   void forEachStubAtom(const std::function<void(const ld::Atom *)> &handler);
+  bool containsStubName(const char *name) const {
+    return stubNames_.find(name) != stubNames_.end();
+  }
   void forEachSegmentBoundary(
       const std::function<void(SegmentBoundary &, uint32_t)> &handler);
   void forEachRebaseInfo(
@@ -432,10 +435,26 @@ class Incremental {
     return dylibToOrdinal_;
   }
 
-  constexpr uint64_t symSectionOffset(uint8_t type, const char *symbol) {
+  uint64_t symSectionOffset(uint8_t type, const char *symbol) {
     auto &offsetMap = symToSectionOffset_[type];
-    return offsetMap[symbol];
+    if (offsetMap.find(symbol) != offsetMap.end()) {
+      return offsetMap[symbol];
+    }
+    return ULONG_MAX;
   }
+
+  uint32_t symbolIndexInStrings(const char *symbol) const {
+    auto it = stringPool_.find(symbol);
+    if (it != stringPool_.end()) {
+      return it->second;
+    }
+    return UINT_MAX;
+  }
+
+  uint32_t addUnique(const char *symbol);
+
+  void forEachAppendedString(
+      const std::function<void(const std::string &)> &handler);
 
  private:
   Options &_options;
@@ -447,12 +466,16 @@ class Incremental {
   IncrFixupsMap incrFixupsMap_;
   std::unordered_map<std::string, PatchSpace> patchSpace_;
   std::vector<const ld::Atom *> stubAtoms_;
+  std::unordered_map<std::string, bool> stubNames_;
   std::vector<SegmentBoundary> segmentBoundaries_;
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
   std::vector<BindingInfoTuple> bindingInfo_;
   std::map<const ld::dylib::File *, int> dylibToOrdinal_;
   SymbolSectionOffset symToSectionOffset_;
+  std::unordered_map<std::string, uint32_t> stringPool_;
+  std::vector<std::string> appendStrings_;
+  uint32_t currentBufferUsed_{0};
 };
 
 }  // namespace incremental

@@ -108,6 +108,9 @@ class Parser {
   constexpr IncrFixupsMap &incrFixupsMap() { return incrFixupsMap_; }
   constexpr IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
   constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
+  constexpr std::unordered_map<std::string, bool> &stubNames() {
+    return stubNames_;
+  }
 
   constexpr uint64_t baseAddress() const { return baseAddress_; }
   constexpr std::vector<SegmentBoundary> &segmentBoundaries() {
@@ -133,6 +136,16 @@ class Parser {
 
   constexpr SymbolSectionOffset &symToSectionOffset() {
     return symToSectionOffset_;
+  }
+
+  constexpr std::unordered_map<std::string, uint32_t> &stringPool() {
+    return stringPool_;
+  }
+
+  constexpr uint32_t currentBufferUsed() const { return currentBufferUsed_; }
+
+  constexpr std::unordered_map<std::string, uint32_t> &symbolToIndex() {
+    return symbolToIndex_;
   }
 
  private:
@@ -215,6 +228,8 @@ class Parser {
   const GlobalSymbolTableEntry<P> *fIncrementalSymbolSection_;
   const char *stringTable_;
   const char *stringTableEnd_;
+  std::unordered_map<std::string, uint32_t> stringPool_;
+  uint32_t currentBufferUsed_;
   const uint32_t *indirectSymbolTable_;
   uint32_t indirectTableCount_;
   const char *fIncrementalStrings_;
@@ -225,6 +240,7 @@ class Parser {
   std::vector<std::string> incrStringPool_;
   IncrPatchSpaceMap incrPatchSpaceMap_;
   std::vector<const ld::Atom *> stubAtoms_;
+  std::unordered_map<std::string, bool> stubNames_;
   /// MachO sections boundary
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   /// ObjC class address
@@ -254,6 +270,7 @@ class Parser {
   std::unordered_map<std::string, const macho_nlist<P> *> dylibSymbolMap_;
   /// Symbol table section offset
   SymbolSectionOffset symToSectionOffset_;
+  std::unordered_map<std::string, uint32_t> symbolToIndex_;
 };
 
 template <typename A>
@@ -281,7 +298,7 @@ Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength,
   if (!validFile(fileContent)) {
     throw "not a mach-o file that can be checked";
   }
-  fHeader_ = (const macho_header<P> *)fileContent_;
+  fHeader_ = reinterpret_cast<const macho_header<P> *>(fileContent_);
   this->checkMachOHeader();
   this->parseIncrementalSections();
   this->parseDyldInfoSegment(dyldInfo_);
@@ -929,6 +946,9 @@ void Parser<A>::parseIncrementalPatchSpaceSection(
       const_cast<PatchSpaceSectionEntry<P> *>(fIncrementalPatchSpaceSection_);
   uint32_t patchCount = patchSpaceEnd - fIncrementalPatchSpaceSection_;
   for (uint32_t patchIndex = 0; patchIndex < patchCount; ++patchIndex, ++p) {
+    if (strcmp(p->sectname(), "__string_pool") == 0) {
+      continue;
+    }
     PatchSpace patchSpace;
     strncpy(patchSpace.sectname, p->sectname(), 17);
     patchSpace.patchOffset_ = p->patchOffset();
@@ -975,23 +995,67 @@ void Parser<A>::parseIncrementalStringPool(
   // incremental string pool
   fIncrementalStrings_ =
       (const char *)((uint8_t *)fHeader_ + incrementalCommand->strtab_off());
-  char *stringStart = const_cast<char *>(fIncrementalStrings_);
-  char *stringEnd = const_cast<char *>(fIncrementalStrings_) +
-                    incrementalCommand->strtab_size();
+  char *p = const_cast<char *>(fIncrementalStrings_);
+  const char *stringEnd =
+      fIncrementalStrings_ + incrementalCommand->strtab_size();
   uint32_t stringIdx = 0;
-  while (stringStart < stringEnd) {
-    const char *symName = &stringStart[stringIdx++];
-    if (!symName || strlen(symName) == 0) {
+  while (p < stringEnd) {
+    const char *symName = &fIncrementalStrings_[stringIdx];
+    size_t length = strlen(symName);
+    if (!symName || length == 0) {
       break;
     }
     incrStringPool_.push_back(symName);
-    stringStart += strlen(symName);
+    p += length + 1;
+    stringIdx += length + 1;
   }
 }
 
 template <typename A>
 void Parser<A>::parseSymbolTable(const macho_load_command<P> *cmd) {
   const macho_symtab_command<P> *symtab = (macho_symtab_command<P> *)cmd;
+  // String pool
+  stringTable_ = (char *)fHeader_ + symtab->stroff();
+  stringTableEnd_ = stringTable_ + symtab->strsize();
+  if (symtab->stroff() < linkEditSegment_->fileoff()) {
+    throw "string pool not in __LINKEDIT";
+  }
+  if ((symtab->stroff() + symtab->strsize()) >
+      (linkEditSegment_->fileoff() + linkEditSegment_->filesize())) {
+    throw "string pool extends beyond __LINKEDIT";
+  }
+  if ((symtab->stroff() % 4) != 0) {
+    throw "string pool start not pointer aligned";
+  }
+
+  char *p = const_cast<char *>(stringTable_);
+  uint32_t stringIdx = 0;
+  while (p < stringTableEnd_) {
+    const char *symName = &stringTable_[stringIdx];
+    size_t length = strlen(symName);
+    if (!symName || length == 0) {
+      break;
+    }
+    stringPool_[symName] = stringIdx;
+    p += length + 1;
+    stringIdx += length + 1;
+  }
+  ptrdiff_t patchOffset = uintptr_t(p) - uintptr_t(stringTable_);
+  currentBufferUsed_ = patchOffset;
+  PatchSpace patchSpace;
+  strcpy(patchSpace.sectname, "__string_pool");
+  patchSpace.patchOffset_ = patchOffset;
+  patchSpace.patchSpace_ = symtab->strsize() - patchOffset;
+  incrPatchSpaceMap_["__string_pool"] = patchSpace;
+
+  // string pool section boundary
+  SectionBoundary stringBoundary;
+  stringBoundary.address_ = baseAddress() + symtab->stroff();
+  stringBoundary.fileOffset_ = symtab->stroff();
+  stringBoundary.size_ = symtab->strsize();
+  sectionBoundaryMap_["__string_pool"] = stringBoundary;
+
+  // Symbol table
   symbolCount_ = symtab->nsyms();
   if (symbolCount_ != 0) {
     symbolTable_ =
@@ -1007,19 +1071,6 @@ void Parser<A>::parseSymbolTable(const macho_load_command<P> *cmd) {
       throw "symbol table start not pointer aligned";
     }
   }
-  stringTable_ = (char *)fHeader_ + symtab->stroff();
-  stringTableEnd_ = stringTable_ + symtab->strsize();
-  if (symtab->stroff() < linkEditSegment_->fileoff()) {
-    throw "string pool not in __LINKEDIT";
-  }
-  if ((symtab->stroff() + symtab->strsize()) >
-      (linkEditSegment_->fileoff() + linkEditSegment_->filesize())) {
-    throw "string pool extends beyond __LINKEDIT";
-  }
-  if ((symtab->stroff() % 4) != 0) {
-    throw "string pool start not pointer aligned";
-  }
-  // Symbol table
   for (uint32_t i = 0; i < symbolCount_; ++i) {
     const macho_nlist<P> *sym = &symbolTable_[i];
     const char *symName = this->nameFromSymbol(*sym);
@@ -1065,6 +1116,14 @@ void Parser<A>::parseIndirectSymbolTable() {
     if ((fDynamicSymbolTable_->indirectsymoff() % sizeof(pint_t)) != 0) {
       throw "indirect symbol table not pointer aligned";
     }
+    // indirect symbol section boundary
+    SectionBoundary sectionBoundary;
+    sectionBoundary.address_ =
+        baseAddress() + fDynamicSymbolTable_->indirectsymoff();
+    sectionBoundary.fileOffset_ = fDynamicSymbolTable_->indirectsymoff();
+    sectionBoundary.size_ =
+        fDynamicSymbolTable_->nindirectsyms() * sizeof(macho_nlist<P>);
+    sectionBoundaryMap_["__ind_sym_tab"] = sectionBoundary;
 
     const macho_load_command<P> *cmd = cmds;
     for (uint32_t i = 0; i < cmd_count; ++i) {
@@ -1088,7 +1147,8 @@ void Parser<A>::parseIndirectSymbolTable() {
                 elementSize = sect->reserved2();
                 start = sect->reserved1();
                 break;
-                //                        case S_LAZY_SYMBOL_POINTERS:
+                //  case S_LAZY_SYMBOL_POINTERS:
+                //  case S_THREAD_LOCAL_VARIABLE_POINTERS:
               case S_NON_LAZY_SYMBOL_POINTERS:
                 elementSize = sizeof(pint_t);
                 start = sect->reserved1();
@@ -1105,22 +1165,22 @@ void Parser<A>::parseIndirectSymbolTable() {
                   uint32_t ordinal = GET_LIBRARY_ORDINAL(sym.n_desc());
                   const macho_dylib_command<P> *dylibCommand =
                       dylibLoadCommands_[ordinal - 1];
-                  fprintf(stderr, "sect:%s, stub symbol:%s, %llu, ordinal:%u\n",
-                          sect->sectname(), this->nameFromSymbol(sym),
-                          (uint64_t)address, ordinal);
-                  generic::dylib::File *file = new generic::dylib::File(
+                  const char *symbolName = this->nameFromSymbol(sym);
+                  if (strcmp(symbolName, "dyld_stub_binder") == 0) {
+                    continue;
+                  }
+                  auto file = new generic::dylib::File(
                       dylibCommand->name(), 0,
                       ld::File::Ordinal::makeArgOrdinal(ordinal),
                       options_.platforms(), false, false, false, false, true);
-                  generic::dylib::ExportAtom *atom =
-                      new generic::dylib::ExportAtom(
-                          *file, this->nameFromSymbol(sym), "", 1,
-                          this->weakImportFromSymbol(sym), false,
-                          (uint64_t)address);
+                  auto atom = new generic::dylib::ExportAtom(
+                      *file, symbolName, "", 1, this->weakImportFromSymbol(sym),
+                      false, (uint64_t)address);
                   atom->setFile(file);
                   stubAtoms_.push_back(atom);
+                  stubNames_[symbolName] = true;
                   dylibToOrdinal_[file] = ordinal;
-                  dylibSymbolMap_.erase(this->nameFromSymbol(sym));
+                  dylibSymbolMap_.erase(symbolName);
                 }
               }
             }
@@ -1161,13 +1221,9 @@ void Parser<A>::parseIndirectSymbolTable() {
     uint32_t ordinal = GET_LIBRARY_ORDINAL(sym->n_desc());
     const macho_dylib_command<P> *dylibCommand =
         dylibLoadCommands_[ordinal - 1];
-    generic::dylib::File *file = new generic::dylib::File(
+    auto file = new generic::dylib::File(
         dylibCommand->name(), 0, ld::File::Ordinal::makeArgOrdinal(ordinal),
         options_.platforms(), false, false, false, false, true);
-    generic::dylib::ExportAtom *atom = new generic::dylib::ExportAtom(
-        *file, this->nameFromSymbol(*sym), "", 1,
-        this->weakImportFromSymbol(*sym), false, 0);
-    atom->setFile(file);
     dylibToOrdinal_[file] = ordinal;
   }
 }
@@ -1334,6 +1390,7 @@ void Incremental::openBinary() {
       objcClassSectionOffsetMap_ = parser.objcClassIndexMap();
       patchSpace_ = parser.patchSpaceMap();
       stubAtoms_ = parser.stubAtoms();
+      stubNames_ = parser.stubNames();
       incrFixupsMap_ = parser.incrFixupsMap();
       baseAddress_ = parser.baseAddress();
       segmentBoundaries_ = parser.segmentBoundaries();
@@ -1342,6 +1399,8 @@ void Incremental::openBinary() {
       bindingInfo_ = parser.bindingInfo();
       dylibToOrdinal_ = parser.dylibToOrdinal();
       symToSectionOffset_ = parser.symToSectionOffset();
+      stringPool_ = parser.stringPool();
+      currentBufferUsed_ = parser.currentBufferUsed();
     } break;
 #endif
 #if SUPPORT_ARCH_arm64_32
@@ -1389,6 +1448,28 @@ void Incremental::forEachRebaseInfo(
 void Incremental::forEachBindingInfo(
     const std::function<void(BindingInfoTuple &)> &handler) {
   for (auto it = bindingInfo_.begin(); it != bindingInfo_.end(); ++it) {
+    handler(*it);
+  }
+}
+
+uint32_t Incremental::addUnique(const char *symbol) {
+  auto it = stringPool_.find(symbol);
+  if (it != stringPool_.end()) {
+    return it->second;
+  }
+  uint32_t offset = currentBufferUsed_;
+  stringPool_[symbol] = offset;
+  appendStrings_.push_back(symbol);
+  currentBufferUsed_ += strlen(symbol);
+
+  auto &offsetMap = symToSectionOffset_[(N_UNDF | N_EXT)];
+  offsetMap[symbol] = currentBufferUsed_;
+  return offset;
+}
+
+void Incremental::forEachAppendedString(
+    const std::function<void(const std::string &)> &handler) {
+  for (auto it = appendStrings_.begin(); it != appendStrings_.end(); it++) {
     handler(*it);
   }
 }

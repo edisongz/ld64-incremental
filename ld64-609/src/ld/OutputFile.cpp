@@ -199,8 +199,8 @@ void OutputFile::write(ld::Internal& state)
 		// build classic symbol table
 		assert(_symbolTableAtom != nullptr);
 		_symbolTableAtom->encode();
-//		assert(_indirectSymbolTableAtom != NULL);
-//		_indirectSymbolTableAtom->encode();
+		assert(_indirectSymbolTableAtom != NULL);
+		_indirectSymbolTableAtom->encode();
 		
 		// assign rebase section address
 		for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
@@ -210,11 +210,16 @@ void OutputFile::write(ld::Internal& state)
 			}
 			if (strcmp(sect->sectionName(), "__rebase") != 0 &&
 				strcmp(sect->sectionName(), "__binding") != 0 &&
-				strcmp(sect->sectionName(), "__symbol_table") != 0) {
+				strcmp(sect->sectionName(), "__symbol_table") != 0 &&
+				strcmp(sect->sectionName(), "__ind_sym_tab") != 0 &&
+				strcmp(sect->sectionName(), "__string_pool") != 0) {
 				continue;
 			}
 			uint64_t curLinkEditAddress = _incremental.sectionStartAddress(sect->sectionName());
 			uint64_t curLinkEditfileOffset = _incremental.sectionFileOffset(sect->sectionName());
+			if (strcmp(sect->sectionName(), "__string_pool") == 0) {
+				curLinkEditfileOffset = _incremental.sectionPatchFileOffset(sect->sectionName());
+			}
 			uint64_t offset = 0;
 			for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 				const ld::Atom* atom = *ait;
@@ -513,13 +518,20 @@ uint32_t OutputFile::incrementalPatchSpace(const ld::Internal::FinalSection &sec
 		if (sect.type() != ld::Section::typeLinkEdit) {
 			return 0;
 		}
-		
+		uint64_t alignment = 1 << maxAlignment;
+		uint64_t patch = 0;
 		if (strcmp(sect.sectionName(), "__symbol_table") == 0 ||
-			strcmp(sect.sectionName(), "__binding") == 0 ||
+			strcmp(sect.sectionName(), "__ind_sym_tab") == 0 ||
+			strcmp(sect.sectionName(), "__string_pool") == 0) {
+			patch = static_cast<uint64_t>(offset * 0.1);
+		}
+		if (strcmp(sect.sectionName(), "__binding") == 0 ||
 			strcmp(sect.sectionName(), "__weak_binding") == 0 ||
-			strcmp(sect.sectionName(), "__lazy_binding") == 0) {
-			uint64_t alignment = 1 << maxAlignment;
-			uint64_t patch = static_cast<uint64_t>(offset);
+			strcmp(sect.sectionName(), "__lazy_binding") == 0 ||
+			strcmp(sect.sectionName(), "__export") == 0) {
+			patch = static_cast<uint64_t>(offset);
+		}
+		if (patch > 0) {
 			uint32_t incrementalPatchSpace = (patch + (alignment - 1)) & (-alignment);
 			fprintf(stderr, "incremental LINKEDIT section:%s, incremental patch space:%u\n", sect.sectionName(), incrementalPatchSpace);
 			return incrementalPatchSpace;
@@ -3749,15 +3761,21 @@ void OutputFile::writeAtomsIncremental(ld::Internal &state, uint8_t *wholeBuffer
 		ld::incremental::PatchSpace patchSpace = _incremental.patchSpace(sect->sectionName());
 		uint64_t patchFileOffset = _incremental.sectionPatchFileOffset(sect->sectionName());
 		uint32_t freeSpace = patchSpace.patchSpace_;
+		if (strcmp(sect->sectionName(), "__stubs") == 0 ||
+			strcmp(sect->sectionName(), "__stub_helper") == 0 ||
+			strcmp(sect->sectionName(), "__got") == 0 ||
+			strcmp(sect->sectionName(), "__nl_symbol_ptr") == 0 ||
+			strcmp(sect->sectionName(), "__la_symbol_ptr") == 0) {
+			patchFileOffset = _incremental.sectionFileOffset(sect->sectionName());
+			auto &boundary = _incremental.sectionBoundary(sect->sectionName());
+			freeSpace = boundary.size_;
+		}
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 			ld::Atom *atom = const_cast<ld::Atom *>(*ait);
 			if (isObjCClassNameSection) {
 				objcClassNames.push_back((const char *)atom->rawContentPointer());
 			}
 			if (atom->definition() == ld::Atom::definitionProxy) {
-				continue;
-			}
-			if (!atom->file()) {
 				continue;
 			}
 			try {
@@ -4165,7 +4183,9 @@ void OutputFile::writeOutputFileIncremental(ld::Internal &state) {
 void OutputFile::updateLinkEditIncremental(ld::Internal &state, ld::Internal::FinalSection *sect, uint8_t *wholeBuffer) {
 	if (strcmp(sect->sectionName(), "__rebase") != 0 &&
 		strcmp(sect->sectionName(), "__binding") != 0 &&
-		strcmp(sect->sectionName(), "__symbol_table") != 0) {
+		strcmp(sect->sectionName(), "__symbol_table") != 0 &&
+		strcmp(sect->sectionName(), "__ind_sym_tab") != 0 &&
+		strcmp(sect->sectionName(), "__string_pool") != 0) {
 		return;
 	}
 	for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
