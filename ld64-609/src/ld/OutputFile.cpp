@@ -184,16 +184,26 @@ void OutputFile::write(ld::Internal& state)
 			std::tie(type, ordi, symbol, weakImport, address, addend) = info;
 			_bindingInfo.push_back(BindingInfo(type, ordi, symbol, weakImport, address, addend));
 		});
+		_incremental.forEachLazyBindingInfo([&](ld::incremental::BindingInfoTuple &info) {
+			uint8_t type;
+			int ordi;
+			const char *symbol;
+			bool weakImport;
+			uint64_t address;
+			int64_t addend;
+			std::tie(type, ordi, symbol, weakImport, address, addend) = info;
+			_lazyBindingInfo.push_back(BindingInfo(type, ordi, symbol, weakImport, address, addend));
+		});
 		this->generateLinkEditInfo(state);
 //		this->updateLINKEDITAddresses(state);
 		
 		if ( _options.makeCompressedDyldInfo() || state.cantUseChainedFixups) {
-			// build dylb rebasing info
 			assert(_rebasingInfoAtom != nullptr);
 			_rebasingInfoAtom->encode();
-			// build dyld binding info
 			assert(_bindingInfoAtom != nullptr);
 			_bindingInfoAtom->encode();
+			assert(_lazyBindingInfoAtom != nullptr);
+			_lazyBindingInfoAtom->encode();
 		}
 		
 		// build classic symbol table
@@ -210,6 +220,7 @@ void OutputFile::write(ld::Internal& state)
 			}
 			if (strcmp(sect->sectionName(), "__rebase") != 0 &&
 				strcmp(sect->sectionName(), "__binding") != 0 &&
+				strcmp(sect->sectionName(), "__lazy_binding") != 0 &&
 				strcmp(sect->sectionName(), "__symbol_table") != 0 &&
 				strcmp(sect->sectionName(), "__ind_sym_tab") != 0 &&
 				strcmp(sect->sectionName(), "__string_pool") != 0) {
@@ -338,6 +349,12 @@ void OutputFile::assignIncrementalAtomAddresses(ld::Internal &state) {
 	if ( log ) fprintf(stderr, "assignIncrementalAtomAddresses()\n");
 	for (auto sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
 		ld::Internal::FinalSection *sect = *sit;
+		
+		bool isStubs = (strcmp(sect->sectionName(), "__stubs") == 0 ||
+			strcmp(sect->sectionName(), "__stub_helper") == 0 ||
+			strcmp(sect->sectionName(), "__got") == 0 ||
+			strcmp(sect->sectionName(), "__nl_symbol_ptr") == 0 ||
+		strcmp(sect->sectionName(), "__la_symbol_ptr") == 0);
 		bool isObjCClassListSection = (strcmp(sect->sectionName(), "__objc_classlist") == 0);
 		if ( log ) fprintf(stderr, "  section=%s/%s\n", sect->segmentName(), sect->sectionName());
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
@@ -356,7 +373,7 @@ void OutputFile::assignIncrementalAtomAddresses(ld::Internal &state) {
 					break;
 				default:
 					uint64_t sectionStartAddress = _incremental.sectionStartAddress(sect->sectionName()) + _incremental.patchSpace(sect->sectionName()).patchOffset_;
-					if (isObjCClassListSection) {
+					if (isStubs || isObjCClassListSection) {
 						sectionStartAddress = _incremental.sectionStartAddress(sect->sectionName());
 					}
 					(const_cast<ld::Atom *>(atom))->setSectionStartAddress(sectionStartAddress);
@@ -4183,6 +4200,7 @@ void OutputFile::writeOutputFileIncremental(ld::Internal &state) {
 void OutputFile::updateLinkEditIncremental(ld::Internal &state, ld::Internal::FinalSection *sect, uint8_t *wholeBuffer) {
 	if (strcmp(sect->sectionName(), "__rebase") != 0 &&
 		strcmp(sect->sectionName(), "__binding") != 0 &&
+		strcmp(sect->sectionName(), "__lazy_binding") != 0 &&
 		strcmp(sect->sectionName(), "__symbol_table") != 0 &&
 		strcmp(sect->sectionName(), "__ind_sym_tab") != 0 &&
 		strcmp(sect->sectionName(), "__string_pool") != 0) {
@@ -6127,8 +6145,17 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 	if ( needsLazyBinding ) {
 		if ( _options.bindAtLoad() )
 			_bindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, address, addend));
-		else
-			_lazyBindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, address, addend));
+		else {
+			if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
+				if (!_incremental.containsStubName(target->name())) {
+					auto &lazyBindingItem = _lazyBindingInfo.back();
+					const uint64_t pointerSize = (_options.architecture() & CPU_ARCH_ABI64) ? 8 : 4;
+					_lazyBindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, lazyBindingItem._address + pointerSize, addend));
+				}
+			} else {
+				_lazyBindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, address, addend));
+			}
+		}
 	}
 	if ( needsWeakBinding )
 		_weakBindingInfo.push_back(BindingInfo(type, 0, target->name(), false, address, addend));

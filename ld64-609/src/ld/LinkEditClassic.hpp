@@ -573,6 +573,15 @@ void SymbolTableAtom<A>::addImport(const ld::Atom* atom, StringPoolAtom* pool)
 		}
 	}
 	
+	if (_options.validIncrementalUpdate()) {
+		uint64_t sectionOffset = this->_writer.incremental().symSectionOffset(entry.n_type(), atom->name());
+		if (sectionOffset == ULONG_MAX) {
+			uint32_t index = this->_writer.incremental().symbolIndexInStrings(atom->name());
+			entry.set_n_strx(index);
+			this->_writer.incremental().addSymSectionOffset(entry.n_type(), atom->name());
+		}
+	}
+	
 	// add to array
 	_imports.push_back(entry);
 }
@@ -780,16 +789,17 @@ void SymbolTableAtom<A>::copyRawContent(uint8_t buffer[]) const
 		uint32_t prevOffset = 0;
 		for (auto it = _imports.begin(); it != _imports.end(); ++it) {
 			const char *symbolName = this->_writer._stringPoolAtom->stringForIndex(it->n_strx());
-			uint64_t sectionOffset = incremental.symSectionOffset(it->n_type(), symbolName);
-			if (sectionOffset == ULONG_MAX) {
-				uint32_t index = incremental.symbolIndexInStrings(symbolName);
-				it->set_n_strx(index);
+			if (strlen(symbolName) == 0) {
 				incrmentalImports.push_back(*it);
 			} else {
+				uint64_t sectionOffset = incremental.symSectionOffset(it->n_type(), symbolName);
 				prevOffset = sectionOffset;
 			}
 		}
-		memcpy(&buffer[prevOffset + sizeof(macho_nlist<P>)], &incrmentalImports[0], incrmentalImports.size() * sizeof(macho_nlist<P>));
+		// dyld_stub_binder
+		macho_nlist<P> *binder = reinterpret_cast<macho_nlist<P> *>(&buffer[prevOffset]);
+		incrmentalImports.push_back(*binder);
+		memcpy(&buffer[prevOffset], &incrmentalImports[0], incrmentalImports.size() * sizeof(macho_nlist<P>));
 		return;
 	}
 	

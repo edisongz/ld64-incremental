@@ -101,6 +101,9 @@ class Parser {
          const Options &options, time_t modTime);
   bool hasValidEntryPoint() const { return entryPoint_ != nullptr; }
   bool canIncrementalUpdate();
+  /// Symol table item size
+  size_t MachONlistSize() const { return sizeof(macho_nlist<P>); }
+  uint32_t symbolCount() const { return symbolCount_; }
   IncrInputMap &incrInputsMap() { return incrInputsMap_; }
   constexpr std::unordered_map<std::string, uint32_t> &objcClassIndexMap() {
     return objcClassIndexMap_;
@@ -108,10 +111,7 @@ class Parser {
   constexpr IncrFixupsMap &incrFixupsMap() { return incrFixupsMap_; }
   constexpr IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
   constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
-  constexpr std::unordered_map<std::string, bool> &stubNames() {
-    return stubNames_;
-  }
-
+  constexpr std::unordered_set<std::string> &stubNames() { return stubNames_; }
   constexpr uint64_t baseAddress() const { return baseAddress_; }
   constexpr std::vector<SegmentBoundary> &segmentBoundaries() {
     return segmentBoundaries_;
@@ -130,6 +130,10 @@ class Parser {
     return bindingInfo_;
   }
 
+  constexpr std::vector<BindingInfoTuple> &lazyBindingInfo() {
+    return lazyBindingInfo_;
+  }
+
   constexpr std::map<const ld::dylib::File *, int> &dylibToOrdinal() {
     return dylibToOrdinal_;
   }
@@ -138,21 +142,31 @@ class Parser {
     return symToSectionOffset_;
   }
 
+  constexpr std::unordered_map<uint8_t, uint32_t> &symbolTypeToOffset() {
+    return symbolTypeToOffset_;
+  }
+
   constexpr std::unordered_map<std::string, uint32_t> &stringPool() {
     return stringPool_;
   }
 
   constexpr uint32_t currentBufferUsed() const { return currentBufferUsed_; }
 
-  constexpr std::unordered_map<std::string, uint32_t> &symbolToIndex() {
-    return symbolToIndex_;
-  }
-
  private:
   void checkMachOHeader();
   pint_t segStartAddress(uint8_t segIndex);
   bool isStaticExecutable() const;
   uint8_t loadCommandSizeMask();
+
+  /// Record MachO section boundary
+  void recordSectionBoudary(const char *symbol, uint64_t fileOffset,
+                            uint32_t size) {
+    SectionBoundary sectionBoundary;
+    sectionBoundary.address_ = baseAddress() + fileOffset;
+    sectionBoundary.fileOffset_ = fileOffset;
+    sectionBoundary.size_ = size;
+    sectionBoundaryMap_[symbol] = sectionBoundary;
+  }
 
   /// Parse Symbols
   void parseSymbolTable(const macho_load_command<P> *cmd);
@@ -181,10 +195,13 @@ class Parser {
   void parseRebaseSection(const macho_dyld_info_command<P> *segCmd);
   /// Parse __binding section
   void parseBindingSection(const macho_dyld_info_command<P> *segCmd,
+                           std::vector<BindingInfoTuple> &bindingInfo,
                            bool weakBinding);
+  /// Parse __lazy_binding section
+  void ParseLazyBindingSection(const macho_dyld_info_command<P> *segCmd);
 
   /// Parse Incremental sections
-  void parseIncrementalSections();
+  void parseSections();
 
   /// Parse incremental fixup section
   /// @param incrementalCommand LC_INCREMENTAL
@@ -240,7 +257,7 @@ class Parser {
   std::vector<std::string> incrStringPool_;
   IncrPatchSpaceMap incrPatchSpaceMap_;
   std::vector<const ld::Atom *> stubAtoms_;
-  std::unordered_map<std::string, bool> stubNames_;
+  std::unordered_set<std::string> stubNames_;
   /// MachO sections boundary
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   /// ObjC class address
@@ -270,7 +287,7 @@ class Parser {
   std::unordered_map<std::string, const macho_nlist<P> *> dylibSymbolMap_;
   /// Symbol table section offset
   SymbolSectionOffset symToSectionOffset_;
-  std::unordered_map<std::string, uint32_t> symbolToIndex_;
+  std::unordered_map<uint8_t, uint32_t> symbolTypeToOffset_;
 };
 
 template <typename A>
@@ -300,7 +317,7 @@ Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength,
   }
   fHeader_ = reinterpret_cast<const macho_header<P> *>(fileContent_);
   this->checkMachOHeader();
-  this->parseIncrementalSections();
+  this->parseSections();
   this->parseDyldInfoSegment(dyldInfo_);
   this->parseIndirectSymbolTable();
 }
@@ -486,7 +503,7 @@ bool Parser<A>::isStaticExecutable() const {
 }
 
 template <typename A>
-void Parser<A>::parseIncrementalSections() {
+void Parser<A>::parseSections() {
   const uint8_t *const endOfFile = (uint8_t *)fHeader_ + fileLength_;
   const uint8_t *const endOfLoadCommands =
       (uint8_t *)fHeader_ + sizeof(macho_header<P>) + fHeader_->sizeofcmds();
@@ -661,8 +678,9 @@ void Parser<A>::parseObjCData(const macho_section<P> *sect) {
 template <typename A>
 void Parser<A>::parseDyldInfoSegment(const macho_dyld_info_command<P> *segCmd) {
   this->parseRebaseSection(segCmd);
-  this->parseBindingSection(segCmd, false);
-  this->parseBindingSection(segCmd, true);
+  this->parseBindingSection(segCmd, bindingInfo_, false);
+  this->parseBindingSection(segCmd, weakBindingInfo_, true);
+  this->ParseLazyBindingSection(segCmd);
 }
 
 template <typename A>
@@ -749,21 +767,22 @@ void Parser<A>::parseRebaseSection(const macho_dyld_info_command<P> *segCmd) {
 
 template <typename A>
 void Parser<A>::parseBindingSection(const macho_dyld_info_command<P> *segCmd,
-                                    bool weakbinding) {
+                                    std::vector<BindingInfoTuple> &bindingInfo,
+                                    bool weakBinding) {
   if (!segCmd) {
     printf("no compressed binding info\n");
     return;
-  } else if (!weakbinding && (segCmd->bind_off() == 0)) {
+  } else if (!weakBinding && (segCmd->bind_off() == 0)) {
     printf("no compressed binding info\n");
     return;
-  } else if (weakbinding && (segCmd->weak_bind_off() == 0)) {
+  } else if (weakBinding && (segCmd->weak_bind_off() == 0)) {
     printf("no compressed weak binding info\n");
     return;
   }
 
   const uint8_t *start;
   const uint8_t *end;
-  if (weakbinding) {
+  if (weakBinding) {
     printf("weak binding opcodes:\n");
     start = (uint8_t *)fHeader_ + segCmd->weak_bind_off();
     end = &start[segCmd->weak_bind_size()];
@@ -771,12 +790,8 @@ void Parser<A>::parseBindingSection(const macho_dyld_info_command<P> *segCmd,
     printf("binding opcodes:\n");
     start = (uint8_t *)fHeader_ + segCmd->bind_off();
     end = &start[segCmd->bind_size()];
-
-    SectionBoundary sectionBoundary;
-    sectionBoundary.address_ = baseAddress() + segCmd->bind_off();
-    sectionBoundary.fileOffset_ = segCmd->bind_off();
-    sectionBoundary.size_ = segCmd->bind_size();
-    sectionBoundaryMap_["__binding"] = sectionBoundary;
+    this->recordSectionBoudary("__binding", segCmd->bind_off(),
+                               segCmd->bind_size());
   }
   const uint8_t *p = start;
   uint8_t type = 0;
@@ -835,27 +850,27 @@ void Parser<A>::parseBindingSection(const macho_dyld_info_command<P> *segCmd,
         address += val;
       } break;
       case BIND_OPCODE_DO_BIND:
-        bindingInfo_.push_back(std::make_tuple(type, libraryOrdinal, symbolName,
-                                               weakImport, address, addend));
+        bindingInfo.push_back(std::make_tuple(type, libraryOrdinal, symbolName,
+                                              weakImport, address, addend));
         address += sizeof(pint_t);
         break;
       case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
         skip = read_uleb128(p, end);
-        bindingInfo_.push_back(std::make_tuple(type, libraryOrdinal, symbolName,
-                                               weakImport, address, addend));
+        bindingInfo.push_back(std::make_tuple(type, libraryOrdinal, symbolName,
+                                              weakImport, address, addend));
         address += sizeof(pint_t) + skip;
         break;
       case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
         skip = immediate * sizeof(pint_t) + sizeof(pint_t);
-        bindingInfo_.push_back(std::make_tuple(type, libraryOrdinal, symbolName,
-                                               weakImport, address, addend));
+        bindingInfo.push_back(std::make_tuple(type, libraryOrdinal, symbolName,
+                                              weakImport, address, addend));
         address += skip;
         break;
       case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
         count = read_uleb128(p, end);
         skip = read_uleb128(p, end);
         for (uint32_t i = 0; i < count; ++i) {
-          bindingInfo_.push_back(std::make_tuple(
+          bindingInfo.push_back(std::make_tuple(
               type, libraryOrdinal, symbolName, weakImport, address, addend));
           address += sizeof(pint_t) + skip;
         }
@@ -874,6 +889,80 @@ void Parser<A>::parseBindingSection(const macho_dyld_info_command<P> *segCmd,
         break;
       default:
         throwf("unknown bind opcode %d", *p);
+    }
+  }
+}
+
+template <typename A>
+void Parser<A>::ParseLazyBindingSection(
+    const macho_dyld_info_command<P> *segCmd) {
+  if (!segCmd || segCmd->lazy_bind_off() == 0) {
+    printf("no compressed lazy binding info\n");
+    return;
+  }
+  this->recordSectionBoudary("__lazy_binding", segCmd->lazy_bind_off(),
+                             segCmd->lazy_bind_size());
+  const uint8_t *const start = (uint8_t *)fHeader_ + segCmd->lazy_bind_off();
+  const uint8_t *const end = &start[segCmd->lazy_bind_size()];
+
+  uint8_t type = BIND_TYPE_POINTER;
+  uint8_t segIndex = 0;
+  uint64_t segOffset = 0;
+  const char *symbolName = nullptr;
+  int libraryOrdinal = 0;
+  int64_t addend = 0;
+  pint_t segStartAddr = 0;
+  bool weakImport = false;
+  for (const uint8_t *p = start; p < end;) {
+    uint8_t immediate = *p & BIND_IMMEDIATE_MASK;
+    uint8_t opcode = *p & BIND_OPCODE_MASK;
+    ++p;
+    switch (opcode) {
+      case BIND_OPCODE_DONE:
+        break;
+      case BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
+        libraryOrdinal = immediate;
+        break;
+      case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
+        libraryOrdinal = read_uleb128(p, end);
+        break;
+      case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
+        // the special ordinals are negative numbers
+        if (immediate == 0)
+          libraryOrdinal = 0;
+        else {
+          int8_t signExtended = BIND_OPCODE_MASK | immediate;
+          libraryOrdinal = signExtended;
+        }
+        break;
+      case BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
+        symbolName = (char *)p;
+        while (*p != '\0') ++p;
+        ++p;
+        weakImport = (immediate & BIND_SYMBOL_FLAGS_WEAK_IMPORT) != 0;
+        break;
+      case BIND_OPCODE_SET_TYPE_IMM:
+        type = immediate;
+        break;
+      case BIND_OPCODE_SET_ADDEND_SLEB:
+        addend = read_sleb128(p, end);
+        break;
+      case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+        segIndex = immediate;
+        segStartAddr = segStartAddress(segIndex);
+        segOffset = read_uleb128(p, end);
+        break;
+      case BIND_OPCODE_ADD_ADDR_ULEB:
+        segOffset += read_uleb128(p, end);
+        break;
+      case BIND_OPCODE_DO_BIND:
+        lazyBindingInfo_.push_back(
+            std::make_tuple(type, libraryOrdinal, symbolName, weakImport,
+                            segStartAddr + segOffset, addend));
+        segOffset += sizeof(pint_t);
+        break;
+      default:
+        throwf("bad lazy bind opcode %d", *p);
     }
   }
 }
@@ -1048,12 +1137,8 @@ void Parser<A>::parseSymbolTable(const macho_load_command<P> *cmd) {
   patchSpace.patchSpace_ = symtab->strsize() - patchOffset;
   incrPatchSpaceMap_["__string_pool"] = patchSpace;
 
-  // string pool section boundary
-  SectionBoundary stringBoundary;
-  stringBoundary.address_ = baseAddress() + symtab->stroff();
-  stringBoundary.fileOffset_ = symtab->stroff();
-  stringBoundary.size_ = symtab->strsize();
-  sectionBoundaryMap_["__string_pool"] = stringBoundary;
+  this->recordSectionBoudary("__string_pool", symtab->stroff(),
+                             symtab->strsize());
 
   // Symbol table
   symbolCount_ = symtab->nsyms();
@@ -1073,6 +1158,10 @@ void Parser<A>::parseSymbolTable(const macho_load_command<P> *cmd) {
   }
   for (uint32_t i = 0; i < symbolCount_; ++i) {
     const macho_nlist<P> *sym = &symbolTable_[i];
+    if (sym->n_strx() == 0) {
+      symbolCount_ = i;
+      break;
+    }
     const char *symName = this->nameFromSymbol(*sym);
     if ((sym->n_type() & N_TYPE) == N_UNDF && (sym->n_type() & N_EXT) != 0) {
       // dylib symbol
@@ -1087,14 +1176,12 @@ void Parser<A>::parseSymbolTable(const macho_load_command<P> *cmd) {
       auto &offsetMap = symToSectionOffset_[sym->n_type()];
       offsetMap[symName] = i * sizeof(macho_nlist<P>);
     }
+    if (symbolTypeToOffset_.find(sym->n_type()) == symbolTypeToOffset_.end()) {
+      symbolTypeToOffset_[sym->n_type()] = i * sizeof(macho_nlist<P>);
+    }
   }
-
-  // section boundary
-  SectionBoundary sectionBoundary;
-  sectionBoundary.address_ = baseAddress() + symtab->symoff();
-  sectionBoundary.fileOffset_ = symtab->symoff();
-  sectionBoundary.size_ = symtab->nsyms() * sizeof(macho_nlist<P>);
-  sectionBoundaryMap_["__symbol_table"] = sectionBoundary;
+  this->recordSectionBoudary("__symbol_table", symtab->symoff(),
+                             symtab->nsyms() * sizeof(macho_nlist<P>));
 }
 
 template <typename A>
@@ -1116,14 +1203,9 @@ void Parser<A>::parseIndirectSymbolTable() {
     if ((fDynamicSymbolTable_->indirectsymoff() % sizeof(pint_t)) != 0) {
       throw "indirect symbol table not pointer aligned";
     }
-    // indirect symbol section boundary
-    SectionBoundary sectionBoundary;
-    sectionBoundary.address_ =
-        baseAddress() + fDynamicSymbolTable_->indirectsymoff();
-    sectionBoundary.fileOffset_ = fDynamicSymbolTable_->indirectsymoff();
-    sectionBoundary.size_ =
-        fDynamicSymbolTable_->nindirectsyms() * sizeof(macho_nlist<P>);
-    sectionBoundaryMap_["__ind_sym_tab"] = sectionBoundary;
+    this->recordSectionBoudary(
+        "__ind_sym_tab", fDynamicSymbolTable_->indirectsymoff(),
+        fDynamicSymbolTable_->nindirectsyms() * sizeof(macho_nlist<P>));
 
     const macho_load_command<P> *cmd = cmds;
     for (uint32_t i = 0; i < cmd_count; ++i) {
@@ -1178,7 +1260,7 @@ void Parser<A>::parseIndirectSymbolTable() {
                       false, (uint64_t)address);
                   atom->setFile(file);
                   stubAtoms_.push_back(atom);
-                  stubNames_[symbolName] = true;
+                  stubNames_.insert(symbolName);
                   dylibToOrdinal_[file] = ordinal;
                   dylibSymbolMap_.erase(symbolName);
                 }
@@ -1203,11 +1285,8 @@ void Parser<A>::parseIndirectSymbolTable() {
         case LC_DYLD_INFO_ONLY: {
           const macho_dyld_info_command<P> *segCmd =
               (const macho_dyld_info_command<P> *)cmd;
-          SectionBoundary sectionBoundary;
-          sectionBoundary.address_ = baseAddress() + segCmd->rebase_off();
-          sectionBoundary.fileOffset_ = segCmd->rebase_off();
-          sectionBoundary.size_ = segCmd->rebase_size();
-          sectionBoundaryMap_["__rebase"] = sectionBoundary;
+          this->recordSectionBoudary("__rebase", segCmd->rebase_off(),
+                                     segCmd->rebase_size());
         } break;
         default:
           break;
@@ -1388,6 +1467,8 @@ void Incremental::openBinary() {
       }
       _options.removeIncrementalInputFiles(incrementalFiles);
       objcClassSectionOffsetMap_ = parser.objcClassIndexMap();
+      machoNlistSize_ = parser.MachONlistSize();
+      symbolCount_ = parser.symbolCount();
       patchSpace_ = parser.patchSpaceMap();
       stubAtoms_ = parser.stubAtoms();
       stubNames_ = parser.stubNames();
@@ -1395,10 +1476,13 @@ void Incremental::openBinary() {
       baseAddress_ = parser.baseAddress();
       segmentBoundaries_ = parser.segmentBoundaries();
       sectionBoundaryMap_ = parser.sectionBoundaryMap();
+      // Dyld info
       rebaseInfo_ = parser.rebaseInfo();
       bindingInfo_ = parser.bindingInfo();
+      lazyBindingInfo_ = parser.lazyBindingInfo();
       dylibToOrdinal_ = parser.dylibToOrdinal();
       symToSectionOffset_ = parser.symToSectionOffset();
+      symbolTypeToOffset_ = parser.symbolTypeToOffset();
       stringPool_ = parser.stringPool();
       currentBufferUsed_ = parser.currentBufferUsed();
     } break;
@@ -1452,6 +1536,27 @@ void Incremental::forEachBindingInfo(
   }
 }
 
+void Incremental::forEachLazyBindingInfo(
+    const std::function<void(BindingInfoTuple &)> &handler) {
+  for (auto it = lazyBindingInfo_.begin(); it != lazyBindingInfo_.end(); ++it) {
+    handler(*it);
+  }
+}
+
+void Incremental::addSymSectionOffset(uint8_t type, const char *symbol) {
+  if (symToSectionOffset_.find(type) == symToSectionOffset_.end()) {
+    return;
+  }
+  auto &offsetMap = symToSectionOffset_[type];
+  uint32_t index = symbolCount_ - 1;
+  if (offsetMap.find(symbol) == offsetMap.end()) {
+    offsetMap[symbol] = index * machoNlistSize_;
+    symbolCount_++;
+  } else {
+    offsetMap[symbol] = index * machoNlistSize_;
+  }
+}
+
 uint32_t Incremental::addUnique(const char *symbol) {
   auto it = stringPool_.find(symbol);
   if (it != stringPool_.end()) {
@@ -1461,9 +1566,6 @@ uint32_t Incremental::addUnique(const char *symbol) {
   stringPool_[symbol] = offset;
   appendStrings_.push_back(symbol);
   currentBufferUsed_ += strlen(symbol);
-
-  auto &offsetMap = symToSectionOffset_[(N_UNDF | N_EXT)];
-  offsetMap[symbol] = currentBufferUsed_;
   return offset;
 }
 

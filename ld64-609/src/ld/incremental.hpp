@@ -408,6 +408,8 @@ class Incremental {
       const std::function<void(std::pair<uint8_t, uint64_t> &)> &handler);
   void forEachBindingInfo(
       const std::function<void(BindingInfoTuple &)> &handler);
+  void forEachLazyBindingInfo(
+      const std::function<void(BindingInfoTuple &)> &handler);
   constexpr std::vector<IncrFixup> &findRelocations(const char *atomName) {
     return incrFixupsMap_[atomName];
   }
@@ -443,6 +445,12 @@ class Incremental {
     return ULONG_MAX;
   }
 
+  uint32_t symbolOffsetForType(uint8_t type) {
+    return symbolTypeToOffset_[type];
+  }
+
+  void addSymSectionOffset(uint8_t type, const char *symbol);
+
   uint32_t symbolIndexInStrings(const char *symbol) const {
     auto it = stringPool_.find(symbol);
     if (it != stringPool_.end()) {
@@ -461,18 +469,22 @@ class Incremental {
   int fd_;
   uint64_t baseAddress_;
   uint8_t *wholeBuffer_;
+  size_t machoNlistSize_{0};
+  uint32_t symbolCount_{0};
   /// ObjC class section offset map
   std::unordered_map<std::string, uint32_t> objcClassSectionOffsetMap_;
   IncrFixupsMap incrFixupsMap_;
   std::unordered_map<std::string, PatchSpace> patchSpace_;
   std::vector<const ld::Atom *> stubAtoms_;
-  std::unordered_map<std::string, bool> stubNames_;
+  std::unordered_set<std::string> stubNames_;
   std::vector<SegmentBoundary> segmentBoundaries_;
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
   std::vector<BindingInfoTuple> bindingInfo_;
+  std::vector<BindingInfoTuple> lazyBindingInfo_;
   std::map<const ld::dylib::File *, int> dylibToOrdinal_;
   SymbolSectionOffset symToSectionOffset_;
+  std::unordered_map<uint8_t, uint32_t> symbolTypeToOffset_;
   std::unordered_map<std::string, uint32_t> stringPool_;
   std::vector<std::string> appendStrings_;
   uint32_t currentBufferUsed_{0};
