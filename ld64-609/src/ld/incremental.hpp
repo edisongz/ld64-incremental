@@ -35,6 +35,7 @@
 #include <tuple>
 #include <vector>
 
+#include "Architectures.hpp"
 #include "InputFiles.h"
 #include "configure.h"
 
@@ -464,6 +465,8 @@ class Incremental {
   void forEachAppendedString(
       const std::function<void(const std::string &)> &handler);
 
+  void UpdateIndirectSymbolIndex(const char *sectionName, uint32_t index);
+
  private:
   Options &_options;
   int fd_;
@@ -488,6 +491,10 @@ class Incremental {
   std::unordered_map<std::string, uint32_t> stringPool_;
   std::vector<std::string> appendStrings_;
   uint32_t currentBufferUsed_{0};
+#if SUPPORT_ARCH_arm64
+  macho_section<arm64::P> *got_section_{nullptr};
+  macho_section<arm64::P> *la_symbol_ptr_section_{nullptr};
+#endif
 };
 
 }  // namespace incremental

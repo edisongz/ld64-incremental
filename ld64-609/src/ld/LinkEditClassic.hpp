@@ -796,10 +796,7 @@ void SymbolTableAtom<A>::copyRawContent(uint8_t buffer[]) const
 				prevOffset = sectionOffset;
 			}
 		}
-		// dyld_stub_binder
-		macho_nlist<P> *binder = reinterpret_cast<macho_nlist<P> *>(&buffer[prevOffset]);
-		incrmentalImports.push_back(*binder);
-		memcpy(&buffer[prevOffset], &incrmentalImports[0], incrmentalImports.size() * sizeof(macho_nlist<P>));
+		memcpy(&buffer[prevOffset + sizeof(macho_nlist<P>)], &incrmentalImports[0], incrmentalImports.size() * sizeof(macho_nlist<P>));
 		return;
 	}
 	
@@ -2416,7 +2413,6 @@ uint32_t IndirectSymbolTableAtom<A>::symbolIndex(const ld::Atom* atom)
 	if (_options.validIncrementalUpdate()) {
 		uint64_t sectionOffset = _writer.incremental().symSectionOffset((N_UNDF | N_EXT), atom->name());
 		uint32_t pos = sectionOffset / sizeof(macho_nlist<P>);
-		printf("2 indirect symbol name:%s %u\n", atom->name(), pos);
 		return pos;
 	}
 	std::map<const ld::Atom*, uint32_t>::iterator pos = this->_writer._atomToSymbolIndex.find(atom);
@@ -2553,6 +2549,9 @@ void IndirectSymbolTableAtom<A>::encodeStubSection(ld::Internal::FinalSection* s
 template <typename A>
 void IndirectSymbolTableAtom<A>::encodeLazyPointerSection(ld::Internal::FinalSection* sect)
 {
+	if (_options.validIncrementalUpdate()) {
+		this->_writer.incremental().UpdateIndirectSymbolIndex(sect->sectionName(), _entries.size());
+	}
 	sect->indirectSymTabStartIndex = _entries.size();
 	for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 		_entries.push_back(symIndexOfLazyPointerAtom(*ait));
@@ -2562,6 +2561,9 @@ void IndirectSymbolTableAtom<A>::encodeLazyPointerSection(ld::Internal::FinalSec
 template <typename A>
 void IndirectSymbolTableAtom<A>::encodeNonLazyPointerSection(ld::Internal::FinalSection* sect)
 {
+	if (_options.validIncrementalUpdate()) {
+		this->_writer.incremental().UpdateIndirectSymbolIndex(sect->sectionName(), _entries.size());
+	}
 	sect->indirectSymTabStartIndex = _entries.size();
 	for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 		_entries.push_back(symIndexOfNonLazyPointerAtom(*ait));

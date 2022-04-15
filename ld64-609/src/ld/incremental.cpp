@@ -11,7 +11,6 @@
 #include <string.h>
 #include <sys/mount.h>
 
-#include "Architectures.hpp"
 #include "generic_dylib_file.hpp"
 
 namespace ld {
@@ -152,6 +151,12 @@ class Parser {
 
   constexpr uint32_t currentBufferUsed() const { return currentBufferUsed_; }
 
+  macho_section<P> *GotSection() const { return got_section_; }
+
+  macho_section<P> *LazySymbolPtrSection() const {
+    return la_symbol_ptr_section_;
+  }
+
  private:
   void checkMachOHeader();
   pint_t segStartAddress(uint8_t segIndex);
@@ -233,6 +238,8 @@ class Parser {
   const Options &options_;
   uint64_t baseAddress_;
   const macho_header<P> *fHeader_;
+  macho_section<P> *got_section_;
+  macho_section<P> *la_symbol_ptr_section_;
   const macho_dyld_info_command<P> *dyldInfo_;
   const macho_entry_point_command<P> *entryPoint_;
   const macho_segment_command<P> *linkEditSegment_;
@@ -615,7 +622,9 @@ void Parser<A>::parseDataConstSegment(const macho_segment_command<P> *segCmd) {
   const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
   for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd;
        ++sect) {
-    if (strncmp(sect->sectname(), "__objc_classlist", 16) == 0) {
+    if (strcmp(sect->sectname(), "__got") == 0) {
+      got_section_ = const_cast<macho_section<P> *>(sect);
+    } else if (strncmp(sect->sectname(), "__objc_classlist", 16) == 0) {
       parseObjcClassList(sect);
     }
   }
@@ -639,7 +648,9 @@ void Parser<A>::parseDataSegment(const macho_segment_command<P> *segCmd) {
   const macho_section<P> *const sectionsEnd = &sectionsStart[segCmd->nsects()];
   for (const macho_section<P> *sect = sectionsStart; sect < sectionsEnd;
        ++sect) {
-    if (strcmp(sect->sectname(), "__objc_data") == 0) {
+    if (strcmp(sect->sectname(), "__la_symbol_ptr") == 0) {
+      la_symbol_ptr_section_ = const_cast<macho_section<P> *>(sect);
+    } else if (strcmp(sect->sectname(), "__objc_data") == 0) {
       parseObjCData(sect);
     }
   }
@@ -1485,6 +1496,8 @@ void Incremental::openBinary() {
       symbolTypeToOffset_ = parser.symbolTypeToOffset();
       stringPool_ = parser.stringPool();
       currentBufferUsed_ = parser.currentBufferUsed();
+      got_section_ = parser.GotSection();
+      la_symbol_ptr_section_ = parser.LazySymbolPtrSection();
     } break;
 #endif
 #if SUPPORT_ARCH_arm64_32
@@ -1548,13 +1561,7 @@ void Incremental::addSymSectionOffset(uint8_t type, const char *symbol) {
     return;
   }
   auto &offsetMap = symToSectionOffset_[type];
-  uint32_t index = symbolCount_ - 1;
-  if (offsetMap.find(symbol) == offsetMap.end()) {
-    offsetMap[symbol] = index * machoNlistSize_;
-    symbolCount_++;
-  } else {
-    offsetMap[symbol] = index * machoNlistSize_;
-  }
+  offsetMap[symbol] = symbolCount_++ * machoNlistSize_;
 }
 
 uint32_t Incremental::addUnique(const char *symbol) {
@@ -1574,6 +1581,19 @@ void Incremental::forEachAppendedString(
   for (auto it = appendStrings_.begin(); it != appendStrings_.end(); it++) {
     handler(*it);
   }
+}
+
+void Incremental::UpdateIndirectSymbolIndex(const char *sectionName,
+                                            uint32_t index) {
+#if SUPPORT_ARCH_arm64
+  if (strcmp(sectionName, "__got") == 0) {
+    assert(got_section_ != nullptr);
+    got_section_->set_reserved1(index);
+  } else if (strcmp(sectionName, "__la_symbol_ptr") == 0) {
+    assert(la_symbol_ptr_section_ != nullptr);
+    la_symbol_ptr_section_->set_reserved1(index);
+  }
+#endif
 }
 
 }  // namespace incremental
