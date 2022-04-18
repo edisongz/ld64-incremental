@@ -165,13 +165,13 @@ void OutputFile::dumpAtomsBySection(ld::Internal& state, bool printAtoms)
 void OutputFile::write(ld::Internal& state)
 {
 	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
-		this->buildDylibOrdinalMapping(state);
 		_dylibToOrdinal.insert(_incremental.dylibToOrdinal().begin(), _incremental.dylibToOrdinal().end());
+		this->buildDylibOrdinalMapping(state);
 		this->addLinkEdit(state);
 		state.setSectionSizesAndAlignments();
 		this->assignIncrementalAtomAddresses(state);
 		this->buildSymbolTable(state);
-		_incremental.forEachRebaseInfo([&](std::pair<uint8_t, uint64_t> item) {
+		_incremental.forEachRebaseInfo([&](std::pair<uint8_t, uint64_t> &item) {
 			_rebaseInfo.push_back(RebaseInfo(item.first, item.second));
 		});
 		_incremental.forEachBindingInfo([&](ld::incremental::BindingInfoTuple &info) {
@@ -5206,6 +5206,9 @@ void OutputFile::buildDylibOrdinalMapping(ld::Internal& state)
 		else if ( this->hasOrdinalForInstallPath(aDylib->installPath(), &ordinal) ) {
 			// already have a dylib with that install path, map all uses to that ordinal
 			_dylibToOrdinal[aDylib] = ordinal;
+			if (_options.validIncrementalUpdate()) {
+				_incremental.updateDylibOrdinal(_dylibToOrdinal, aDylib);
+			}
 		}
 		else if ( aDylib->willBeReExported() && ! aDylib->hasPublicInstallName() && (nonPublicReExportCount >= 2) ) {
 			_dylibsToLoad.push_back(aDylib);
@@ -5215,6 +5218,9 @@ void OutputFile::buildDylibOrdinalMapping(ld::Internal& state)
 			// first time this install path seen, create new ordinal
 			_dylibsToLoad.push_back(aDylib);
 			_dylibToOrdinal[aDylib] = _dylibsToLoad.size();
+			if (_options.validIncrementalUpdate()) {
+				_incremental.updateDylibOrdinal(_dylibToOrdinal, aDylib);
+			}
 		}
 		if ( aDylib->explicitlyLinked() && aDylib->willBeReExported() ) {
 			hasReExports = true;
@@ -6106,11 +6112,7 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 			_hasUnalignedFixup = true;
 		}
 		if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
-			if (strcmp(sect->sectionName(), "__cfstring") == 0 ||
-				strcmp(sect->sectionName(), "__objc_const") == 0 ||
-				strcmp(sect->sectionName(), "__objc_selrefs") == 0 ||
-				strcmp(sect->sectionName(), "__objc_superrefs") == 0 ||
-				strcmp(sect->sectionName(), "__objc_data") == 0) {
+			if (!_incremental.containsRebaseAddress(address)) {
 				_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
 			}
 		} else {

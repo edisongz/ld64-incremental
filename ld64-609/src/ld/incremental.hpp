@@ -433,10 +433,17 @@ class Incremental {
   constexpr std::vector<std::pair<uint8_t, uint64_t>> &rebaseInfo() {
     return rebaseInfo_;
   }
+  bool containsRebaseAddress(uint64_t addr) const {
+    return rebaseAddresses_.find(addr) != rebaseAddresses_.end();
+  }
 
   constexpr std::map<const ld::dylib::File *, int> &dylibToOrdinal() {
     return dylibToOrdinal_;
   }
+
+  void updateDylibOrdinal(
+      std::map<const ld::dylib::File *, int> &dylibToOrdinal,
+      ld::dylib::File *dylib);
 
   uint64_t symSectionOffset(uint8_t type, const char *symbol) {
     auto &offsetMap = symToSectionOffset_[type];
@@ -483,9 +490,11 @@ class Incremental {
   std::vector<SegmentBoundary> segmentBoundaries_;
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
   std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
+  std::unordered_set<uint64_t> rebaseAddresses_;
   std::vector<BindingInfoTuple> bindingInfo_;
   std::vector<BindingInfoTuple> lazyBindingInfo_;
   std::map<const ld::dylib::File *, int> dylibToOrdinal_;
+  std::unordered_map<std::string, int> dylibNameToOrdinal_;
   SymbolSectionOffset symToSectionOffset_;
   std::unordered_map<uint8_t, uint32_t> symbolTypeToOffset_;
   std::unordered_map<std::string, uint32_t> stringPool_;

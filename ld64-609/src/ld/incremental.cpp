@@ -49,6 +49,18 @@ static int64_t read_sleb128(const uint8_t *&p, const uint8_t *end) {
   return result;
 }
 
+static const char *dylibShortName(const char *leafName) {
+  const char *shortName = strstr(leafName, ".");
+  size_t length = strlen(leafName);
+  char *dylibName = new char[length + 1];
+  if (shortName) {
+    length = uintptr_t(shortName) - uintptr_t(leafName);
+  }
+  strncpy(dylibName, leafName, length);
+  *(dylibName + length) = '\0';
+  return dylibName;
+}
+
 template <typename A>
 class ObjCClass {
  public:
@@ -124,6 +136,9 @@ class Parser {
   constexpr std::vector<std::pair<uint8_t, uint64_t>> &rebaseInfo() {
     return rebaseInfo_;
   }
+  constexpr std::unordered_set<uint64_t> &rebaseAddresses() {
+    return rebaseAddresses_;
+  }
 
   constexpr std::vector<BindingInfoTuple> &bindingInfo() {
     return bindingInfo_;
@@ -135,6 +150,10 @@ class Parser {
 
   constexpr std::map<const ld::dylib::File *, int> &dylibToOrdinal() {
     return dylibToOrdinal_;
+  }
+
+  constexpr std::unordered_map<std::string, int> &dylibNameToOrdinal() {
+    return dylibNameToOrdinal_;
   }
 
   constexpr SymbolSectionOffset &symToSectionOffset() {
@@ -281,6 +300,7 @@ class Parser {
   std::vector<SegmentBoundary> segmentBoundaries_;
   /// Dyld rebase info
   std::vector<std::pair<uint8_t, uint64_t>> rebaseInfo_;
+  std::unordered_set<uint64_t> rebaseAddresses_;
   /// Dyld binding info
   std::vector<BindingInfoTuple> bindingInfo_;
   /// Dyld weak binding info
@@ -291,6 +311,7 @@ class Parser {
   std::vector<const macho_dylib_command<P> *> dylibLoadCommands_;
   /// dylib ordinal map
   std::map<const ld::dylib::File *, int> dylibToOrdinal_;
+  std::unordered_map<std::string, int> dylibNameToOrdinal_;
   std::unordered_map<std::string, const macho_nlist<P> *> dylibSymbolMap_;
   /// Symbol table section offset
   SymbolSectionOffset symToSectionOffset_;
@@ -738,6 +759,7 @@ void Parser<A>::parseRebaseSection(const macho_dyld_info_command<P> *segCmd) {
           addr = segStartAddr + segOffset;
           //                    if ((rangeStart <= addr) && (addr < rangeEnd))
           //                        return;
+          rebaseAddresses_.insert(addr);
           rebaseInfo_.push_back({type, addr});
           segOffset += sizeof(pint_t);
         }
@@ -748,6 +770,7 @@ void Parser<A>::parseRebaseSection(const macho_dyld_info_command<P> *segCmd) {
           addr = segStartAddr + segOffset;
           //                    if ( (rangeStart <= addr) && (addr < rangeEnd) )
           //                        return;
+          rebaseAddresses_.insert(addr);
           rebaseInfo_.push_back({type, addr});
           segOffset += sizeof(pint_t);
         }
@@ -756,6 +779,7 @@ void Parser<A>::parseRebaseSection(const macho_dyld_info_command<P> *segCmd) {
         addr = segStartAddr + segOffset;
         //                if ((rangeStart <= addr) && (addr < rangeEnd))
         //                    return;
+        rebaseAddresses_.insert(addr);
         rebaseInfo_.push_back({type, addr});
         segOffset += read_uleb128(p, sectionEnd) + sizeof(pint_t);
         break;
@@ -766,6 +790,7 @@ void Parser<A>::parseRebaseSection(const macho_dyld_info_command<P> *segCmd) {
           addr = segStartAddr + segOffset;
           //                    if ( (rangeStart <= addr) && (addr < rangeEnd) )
           //                        return;
+          rebaseAddresses_.insert(addr);
           rebaseInfo_.push_back({type, addr});
           segOffset += skip + sizeof(pint_t);
         }
@@ -1273,6 +1298,8 @@ void Parser<A>::parseIndirectSymbolTable() {
                   stubAtoms_.push_back(atom);
                   stubNames_.insert(symbolName);
                   dylibToOrdinal_[file] = ordinal;
+                  dylibNameToOrdinal_[dylibShortName(file->leafName())] =
+                      ordinal;
                   dylibSymbolMap_.erase(symbolName);
                 }
               }
@@ -1315,6 +1342,7 @@ void Parser<A>::parseIndirectSymbolTable() {
         dylibCommand->name(), 0, ld::File::Ordinal::makeArgOrdinal(ordinal),
         options_.platforms(), false, false, false, false, true);
     dylibToOrdinal_[file] = ordinal;
+    dylibNameToOrdinal_[dylibShortName(file->leafName())] = ordinal;
   }
 }
 
@@ -1489,9 +1517,11 @@ void Incremental::openBinary() {
       sectionBoundaryMap_ = parser.sectionBoundaryMap();
       // Dyld info
       rebaseInfo_ = parser.rebaseInfo();
+      rebaseAddresses_ = parser.rebaseAddresses();
       bindingInfo_ = parser.bindingInfo();
       lazyBindingInfo_ = parser.lazyBindingInfo();
       dylibToOrdinal_ = parser.dylibToOrdinal();
+      dylibNameToOrdinal_ = parser.dylibNameToOrdinal();
       symToSectionOffset_ = parser.symToSectionOffset();
       symbolTypeToOffset_ = parser.symbolTypeToOffset();
       stringPool_ = parser.stringPool();
@@ -1594,6 +1624,16 @@ void Incremental::UpdateIndirectSymbolIndex(const char *sectionName,
     la_symbol_ptr_section_->set_reserved1(index);
   }
 #endif
+}
+
+void Incremental::updateDylibOrdinal(
+    std::map<const ld::dylib::File *, int> &dylibToOrdinal,
+    ld::dylib::File *dylib) {
+  const char *shortName = dylibShortName(dylib->leafName());
+  auto dit = dylibNameToOrdinal_.find(shortName);
+  if (dit != dylibNameToOrdinal_.end()) {
+    dylibToOrdinal[dylib] = dit->second;
+  }
 }
 
 }  // namespace incremental
