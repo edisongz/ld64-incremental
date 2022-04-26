@@ -68,6 +68,7 @@ class ObjCClass {
   const char *objcClassName(uint64_t addressInClassList) const;
 
 #pragma pack(1)
+  /// __objc_data
   struct Content {
     pint_t isa;
     pint_t superclass;
@@ -97,6 +98,35 @@ class ObjCClass {
 #pragma pack()
 };
 
+//
+// An ExportAtom has no content.  It exists so that the linker can track which
+// imported symbols came from which dynamic libraries.
+//
+class RefsProxyAtom : public ld::Atom {
+ public:
+  RefsProxyAtom(const char *nm)
+      : ld::Atom(_s_section, ld::Atom::definitionProxy, ld::Atom::combineNever,
+                 ld::Atom::scopeLinkageUnit, ld::Atom::typeUnclassified,
+                 ld::Atom::symbolTableIn, false, false, false,
+                 ld::Atom::Alignment(0)),
+        _name(nm) {}
+  // overrides of ld::Atom
+  virtual const ld::File *file() const { return nullptr; }
+  virtual const char *name() const { return _name; }
+  virtual uint64_t size() const { return 0; }
+  virtual uint64_t objectAddress() const { return 0; }
+  virtual void copyRawContent(uint8_t buffer[]) const {}
+  virtual void setScope(Scope) {}
+
+ protected:
+  virtual ~RefsProxyAtom() {}
+  const char *_name;
+  static ld::Section _s_section;
+};
+
+ld::Section RefsProxyAtom::_s_section("__TEXT", "__import",
+                                      ld::Section::typeImportProxies, true);
+
 template <typename A>
 class Parser {
  public:
@@ -122,6 +152,9 @@ class Parser {
   constexpr IncrFixupsMap &incrFixupsMap() { return incrFixupsMap_; }
   constexpr IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
   constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
+  constexpr std::vector<const ld::Atom *> &objcClassRefsAtoms() {
+    return objcClassRefsAtoms_;
+  }
   constexpr std::unordered_set<std::string> &stubNames() { return stubNames_; }
   constexpr uint64_t baseAddress() const { return baseAddress_; }
   constexpr std::vector<SegmentBoundary> &segmentBoundaries() {
@@ -211,6 +244,7 @@ class Parser {
 
   /// Parse segment __DATA
   void parseDataSegment(const macho_segment_command<P> *segCmd);
+  void parseObjCClassRefs(const macho_section<P> *sect);
   void parseObjCData(const macho_section<P> *sect);
 
   /// Parse dynamic loader info
@@ -259,6 +293,7 @@ class Parser {
   const macho_header<P> *fHeader_;
   macho_section<P> *got_section_;
   macho_section<P> *la_symbol_ptr_section_;
+  const macho_section<P> *objcClassRefsSection_;
   const macho_dyld_info_command<P> *dyldInfo_;
   const macho_entry_point_command<P> *entryPoint_;
   const macho_segment_command<P> *linkEditSegment_;
@@ -283,6 +318,7 @@ class Parser {
   std::vector<std::string> incrStringPool_;
   IncrPatchSpaceMap incrPatchSpaceMap_;
   std::vector<const ld::Atom *> stubAtoms_;
+  std::vector<const ld::Atom *> refsAtoms_;
   std::unordered_set<std::string> stubNames_;
   /// MachO sections boundary
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
@@ -291,6 +327,9 @@ class Parser {
   std::unordered_map<uint64_t, uint32_t> objcClassSectionOffsetMap_;
   /// ObjC class index map
   std::unordered_map<std::string, uint32_t> objcClassIndexMap_;
+
+  /// ObjC class refs
+  std::vector<const ld::Atom *> objcClassRefsAtoms_;
 
   /// Incremental fixups map
   IncrFixupsMap incrFixupsMap_;
@@ -309,13 +348,14 @@ class Parser {
   std::vector<BindingInfoTuple> lazyBindingInfo_;
   /// LOAD_DYLIB
   std::vector<const macho_dylib_command<P> *> dylibLoadCommands_;
-  /// dylib ordinal map
+  /// Dylib ordinal map
   std::map<const ld::dylib::File *, int> dylibToOrdinal_;
   std::unordered_map<std::string, int> dylibNameToOrdinal_;
   std::unordered_map<std::string, const macho_nlist<P> *> dylibSymbolMap_;
   /// Symbol table section offset
   SymbolSectionOffset symToSectionOffset_;
   std::unordered_map<uint8_t, uint32_t> symbolTypeToOffset_;
+  std::unordered_map<uint64_t, uint32_t> symbolAddressToIndex_;
 };
 
 template <typename A>
@@ -347,6 +387,7 @@ Parser<A>::Parser(const uint8_t *fileContent, uint64_t fileLength,
   this->checkMachOHeader();
   this->parseSections();
   this->parseDyldInfoSegment(dyldInfo_);
+  this->parseObjCClassRefs(objcClassRefsSection_);
   this->parseIndirectSymbolTable();
 }
 
@@ -671,8 +712,25 @@ void Parser<A>::parseDataSegment(const macho_segment_command<P> *segCmd) {
        ++sect) {
     if (strcmp(sect->sectname(), "__la_symbol_ptr") == 0) {
       la_symbol_ptr_section_ = const_cast<macho_section<P> *>(sect);
+    } else if (strncmp(sect->sectname(), "__objc_classrefs", 16) == 0) {
+      objcClassRefsSection_ = sect;
     } else if (strcmp(sect->sectname(), "__objc_data") == 0) {
       parseObjCData(sect);
+    }
+  }
+}
+
+template <typename A>
+void Parser<A>::parseObjCClassRefs(const macho_section<P> *sect) {
+  const uint64_t *p = (const uint64_t *)((uint8_t *)fHeader_ + sect->offset());
+  uint32_t entryCount = sect->size() / sizeof(pint_t);
+  for (uint32_t i = 0; i < entryCount; i++) {
+    uint64_t address = E::get64(*p++);
+    if (symbolAddressToIndex_.find(address) != symbolAddressToIndex_.end()) {
+      uint32_t symIndex = symbolAddressToIndex_[address];
+      const macho_nlist<P> &sym = this->symbolFromIndex(symIndex);
+      const char *symName = &stringTable_[sym.n_strx()];
+      objcClassRefsAtoms_.push_back(new RefsProxyAtom(symName));
     }
   }
 }
@@ -1215,6 +1273,9 @@ void Parser<A>::parseSymbolTable(const macho_load_command<P> *cmd) {
     if (symbolTypeToOffset_.find(sym->n_type()) == symbolTypeToOffset_.end()) {
       symbolTypeToOffset_[sym->n_type()] = i * sizeof(macho_nlist<P>);
     }
+    if (sym->n_value() != 0) {
+      symbolAddressToIndex_[sym->n_value()] = i;
+    }
   }
   this->recordSectionBoudary("__symbol_table", symtab->symoff(),
                              symtab->nsyms() * sizeof(macho_nlist<P>));
@@ -1510,6 +1571,7 @@ void Incremental::openBinary() {
       symbolCount_ = parser.symbolCount();
       patchSpace_ = parser.patchSpaceMap();
       stubAtoms_ = parser.stubAtoms();
+      objcClassRefsAtoms_ = parser.objcClassRefsAtoms();
       stubNames_ = parser.stubNames();
       incrFixupsMap_ = parser.incrFixupsMap();
       baseAddress_ = parser.baseAddress();
@@ -1554,6 +1616,12 @@ void Incremental::forEachStubAtom(
   for (auto ait = stubAtoms_.begin(); ait != stubAtoms_.end(); ++ait) {
     handler(*ait);
   }
+}
+
+void Incremental::forEachRefsAtom(ld::File::AtomHandler &handler,
+                                  ld::Internal &state) {
+  std::for_each(objcClassRefsAtoms_.begin(), objcClassRefsAtoms_.end(),
+                [&](const ld::Atom *atom) { handler.doAtom(*atom); });
 }
 
 void Incremental::forEachSegmentBoundary(

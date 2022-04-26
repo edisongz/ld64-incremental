@@ -24,7 +24,6 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
-#include <sys/types.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -400,6 +399,7 @@ class Incremental {
   }
   void forEachStubAtom(ld::File::AtomHandler &handler, ld::Internal &state);
   void forEachStubAtom(const std::function<void(const ld::Atom *)> &handler);
+  void forEachRefsAtom(ld::File::AtomHandler &handler, ld::Internal &state);
   bool containsStubName(const char *name) const {
     return stubNames_.find(name) != stubNames_.end();
   }
@@ -486,6 +486,7 @@ class Incremental {
   IncrFixupsMap incrFixupsMap_;
   std::unordered_map<std::string, PatchSpace> patchSpace_;
   std::vector<const ld::Atom *> stubAtoms_;
+  std::vector<const ld::Atom *> objcClassRefsAtoms_;
   std::unordered_set<std::string> stubNames_;
   std::vector<SegmentBoundary> segmentBoundaries_;
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
