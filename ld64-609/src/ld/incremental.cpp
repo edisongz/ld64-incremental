@@ -104,16 +104,17 @@ class ObjCClass {
 //
 class RefsProxyAtom : public ld::Atom {
  public:
-  RefsProxyAtom(const char *nm)
-      : ld::Atom(_s_section, ld::Atom::definitionProxy, ld::Atom::combineNever,
-                 ld::Atom::scopeLinkageUnit, ld::Atom::typeUnclassified,
-                 ld::Atom::symbolTableIn, false, false, false,
-                 ld::Atom::Alignment(0)),
-        _name(nm) {}
+  RefsProxyAtom(const char *nm, uint64_t size)
+      : ld::Atom(_s_section, ld::Atom::definitionRegular,
+                 ld::Atom::combineNever, ld::Atom::scopeLinkageUnit,
+                 ld::Atom::typeZeroFill, ld::Atom::symbolTableNotIn, false,
+                 false, false, ld::Atom::Alignment(0)),
+        _name(nm),
+        size_(size) {}
   // overrides of ld::Atom
   virtual const ld::File *file() const { return nullptr; }
   virtual const char *name() const { return _name; }
-  virtual uint64_t size() const { return 0; }
+  virtual uint64_t size() const { return size_; }
   virtual uint64_t objectAddress() const { return 0; }
   virtual void copyRawContent(uint8_t buffer[]) const {}
   virtual void setScope(Scope) {}
@@ -121,11 +122,12 @@ class RefsProxyAtom : public ld::Atom {
  protected:
   virtual ~RefsProxyAtom() {}
   const char *_name;
+  uint64_t size_;
   static ld::Section _s_section;
 };
 
-ld::Section RefsProxyAtom::_s_section("__TEXT", "__import",
-                                      ld::Section::typeImportProxies, true);
+ld::Section RefsProxyAtom::_s_section("__DATA", "__objc_classrefs",
+                                      ld::Section::typePageZero, true);
 
 template <typename A>
 class Parser {
@@ -730,7 +732,9 @@ void Parser<A>::parseObjCClassRefs(const macho_section<P> *sect) {
       uint32_t symIndex = symbolAddressToIndex_[address];
       const macho_nlist<P> &sym = this->symbolFromIndex(symIndex);
       const char *symName = &stringTable_[sym.n_strx()];
-      objcClassRefsAtoms_.push_back(new RefsProxyAtom(symName));
+      auto refsAtom = new RefsProxyAtom(symName, sizeof(pint_t));
+      refsAtom->setSectionOffset(i * sizeof(pint_t));
+      objcClassRefsAtoms_.push_back(refsAtom);
     }
   }
 }
@@ -1328,9 +1332,10 @@ void Parser<A>::parseIndirectSymbolTable() {
                 break;
                 //  case S_LAZY_SYMBOL_POINTERS:
                 //  case S_THREAD_LOCAL_VARIABLE_POINTERS:
-              case S_NON_LAZY_SYMBOL_POINTERS:
-                elementSize = sizeof(pint_t);
-                start = sect->reserved1();
+                //              case S_NON_LAZY_SYMBOL_POINTERS:
+                //                elementSize = sizeof(pint_t);
+                //                start = sect->reserved1();
+              default:
                 break;
             }
             if (elementSize != 0) {

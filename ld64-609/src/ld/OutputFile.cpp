@@ -356,6 +356,7 @@ void OutputFile::assignIncrementalAtomAddresses(ld::Internal &state) {
 			strcmp(sect->sectionName(), "__nl_symbol_ptr") == 0 ||
 		strcmp(sect->sectionName(), "__la_symbol_ptr") == 0);
 		bool isObjCClassListSection = (strcmp(sect->sectionName(), "__objc_classlist") == 0);
+		bool isObjCClassRefsSection = (strcmp(sect->sectionName(), "__objc_classrefs") == 0);
 		if ( log ) fprintf(stderr, "  section=%s/%s\n", sect->segmentName(), sect->sectionName());
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 			const ld::Atom *atom = *ait;
@@ -373,7 +374,7 @@ void OutputFile::assignIncrementalAtomAddresses(ld::Internal &state) {
 					break;
 				default:
 					uint64_t sectionStartAddress = _incremental.sectionStartAddress(sect->sectionName()) + _incremental.patchSpace(sect->sectionName()).patchOffset_;
-					if (isStubs || isObjCClassListSection) {
+					if (isStubs || isObjCClassListSection || isObjCClassRefsSection) {
 						sectionStartAddress = _incremental.sectionStartAddress(sect->sectionName());
 					}
 					(const_cast<ld::Atom *>(atom))->setSectionStartAddress(sectionStartAddress);

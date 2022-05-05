@@ -1206,7 +1206,8 @@ uint32_t InternalState::incrementalPatchSpace(const ld::Internal::FinalSection &
 			if (strcmp(sect.sectionName(), "__cstring") == 0 ||
 				strcmp(sect.sectionName(), "__objc_classname") == 0 ||
 				strcmp(sect.sectionName(), "__objc_data") == 0 ||
-				strcmp(sect.sectionName(), "__objc_superrefs") == 0) {
+				strcmp(sect.sectionName(), "__objc_superrefs") == 0 ||
+				strcmp(sect.sectionName(), "__objc_selrefs") == 0) {
 				patch = offset;
 			}
 			uint32_t incrementalPatchSpace = (patch + (alignment - 1)) & (-alignment);
