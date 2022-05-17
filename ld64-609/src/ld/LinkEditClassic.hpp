@@ -130,6 +130,7 @@ void StringPoolAtom::copyRawContent(uint8_t buffer[]) const
 		_writer.incremental().forEachAppendedString([&](const std::string &str){
 			memcpy(&buffer[offset], str.c_str(), str.size());
 			offset += str.size();
+			buffer[offset++] = 0;
 		});
 		return;
 	}

@@ -1511,7 +1511,6 @@ void Incremental::openBinary() {
   }
 
   if (outputIsRegularFile && outputIsMappableFile) {
-    // <rdar://problem/20959031> ld64 should clean up temporary files on SIGINT
     ::signal(SIGINT, removePathAndExit);
     fd_ = open(_options.outputFilePath(), O_RDWR | O_CREAT, permissions);
     if (fd_ == -1) {
@@ -1675,7 +1674,7 @@ uint32_t Incremental::addUnique(const char *symbol) {
   uint32_t offset = currentBufferUsed_;
   stringPool_[symbol] = offset;
   appendStrings_.push_back(symbol);
-  currentBufferUsed_ += strlen(symbol);
+  currentBufferUsed_ += strlen(symbol) + 1;
   return offset;
 }
 
