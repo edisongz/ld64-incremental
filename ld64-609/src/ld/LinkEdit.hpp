@@ -2385,18 +2385,12 @@ void IncrementalInputsAtom<A>::encode() const {
 		}
 	}
 	
-	// file list
 	uint32_t index = 0;
 	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
-		const ld::File *file = fileMap[it->path];
-		if (!file) {
-			ld::incremental::InputEntry entry;
-			entry.fileIndexInStringTable_ = index++;
-			entry.modTime_ = it->modTime;
-			entry.type_ = ld::File::Other;
-			this->_encodedData.append_mem(&entry, sizeof(ld::incremental::InputEntry));
+		if (!it->fromFileList) {
 			continue;
 		}
+		const ld::File *file = fileMap[it->path];
 		size_t entrySize = 0;
 		switch (file->type()) {
 			case ld::File::Reloc: {
@@ -2512,6 +2506,9 @@ void IncrementalFixupsAtom<A>::encode() const {
 	uint32_t index = 0;
 	std::unordered_map<std::string, uint32_t> fileIndexMap;
 	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
+		if (!it->fromFileList) {
+			continue;
+		}
 		fileIndexMap[it->path] = index++;
 	}
 	
@@ -2624,6 +2621,9 @@ void IncrementalSymTabAtom<A>::encode() const {
 	uint32_t index = 0;
 	std::unordered_map<std::string, uint32_t> fileIndexMap;
 	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
+		if (!it->fromFileList) {
+			continue;
+		}
 		fileIndexMap[it->path] = index++;
 	}
 	
@@ -2742,6 +2742,9 @@ ld::Section IncrementalStringPoolAtom<A>::_s_section("__LINKEDIT", "__incr_strta
 template <typename A>
 void IncrementalStringPoolAtom<A>::encode() const {
 	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
+		if (!it->fromFileList) {
+			continue;
+		}
 		this->_encodedData.append_mem(it->path, strlen(it->path));
 		this->_encodedData.append_mem("\0", 1);
 	}
