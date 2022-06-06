@@ -4713,13 +4713,13 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom<x86>(_options, state, *this);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<x86>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSection = state.addAtom(*_incrementalAtom);
-				_incrementalFixupsAtom = new IncrementalFixupsAtom<x86>(_options, state, *this);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<x86>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
-				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86>(_options, state, *this);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
-				_incrementalStringTableAtom = new IncrementalStringPoolAtom<x86>(_options, state, *this);
 				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
 			}
 			if ( _hasCodeSignature ) {
@@ -4796,13 +4796,13 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom<x86_64>(_options, state, *this);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<x86_64>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSection = state.addAtom(*_incrementalAtom);
-				_incrementalFixupsAtom = new IncrementalFixupsAtom<x86_64>(_options, state, *this);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<x86_64>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
-				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86_64>(_options, state, *this);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<x86_64>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
-				_incrementalStringTableAtom = new IncrementalStringPoolAtom<x86_64>(_options, state, *this);
 				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
 			}
 			if ( _hasCodeSignature ) {
@@ -4879,13 +4879,13 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom<arm>(_options, state, *this);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<arm>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSection = state.addAtom(*_incrementalAtom);
-				_incrementalFixupsAtom = new IncrementalFixupsAtom<arm>(_options, state, *this);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<arm>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
-				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm>(_options, state, *this);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
-				_incrementalStringTableAtom = new IncrementalStringPoolAtom<arm>(_options, state, *this);
 				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
 			}
 			if ( _hasCodeSignature ) {
@@ -4962,15 +4962,15 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom<arm64>(_options, state, *this);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<arm64>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSection = state.addAtom(*_incrementalAtom);
-				_incrementalFixupsAtom = new IncrementalFixupsAtom<arm64>(_options, state, *this);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<arm64>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
-				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64>(_options, state, *this);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
 				_incrementalPatchSpaceAtom = new IncrementalPatchSpaceAtom<arm64>(_options, state, *this);
 				incrementalPatchSpaceSection = state.addAtom(*_incrementalPatchSpaceAtom);
-				_incrementalStringTableAtom = new IncrementalStringPoolAtom<arm64>(_options, state, *this);
 				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
 			}
 			if ( _hasCodeSignature ) {
@@ -5047,13 +5047,13 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			if (_hasIncrementalLink) {
-				_incrementalAtom = new IncrementalInputsAtom<arm64_32>(_options, state, *this);
+				_incrementalStringTableAtom = new IncrementalStringPoolAtom(_options, state, *this);
+				_incrementalAtom = new IncrementalInputsAtom<arm64_32>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSection = state.addAtom(*_incrementalAtom);
-				_incrementalFixupsAtom = new IncrementalFixupsAtom<arm64_32>(_options, state, *this);
+				_incrementalFixupsAtom = new IncrementalFixupsAtom<arm64_32>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalFixupsSection = state.addAtom(*_incrementalFixupsAtom);
-				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64_32>(_options, state, *this);
+				_incrementalSymTabAtom = new IncrementalSymTabAtom<arm64_32>(_options, state, *this, _incrementalStringTableAtom->incrementalStrings());
 				incrementalSymTabSection = state.addAtom(*_incrementalSymTabAtom);
-				_incrementalStringTableAtom = new IncrementalStringPoolAtom<arm64_32>(_options, state, *this);
 				incrementalStringSection = state.addAtom(*_incrementalStringTableAtom);
 			}
 			if ( _hasCodeSignature ) {

@@ -442,7 +442,7 @@ public:
 	class LinkEditAtom*						_incrementalFixupsAtom;
 	class LinkEditAtom*						_incrementalSymTabAtom;
 	class LinkEditAtom*						_incrementalPatchSpaceAtom;
-	class LinkEditAtom*						_incrementalStringTableAtom;
+	class IncrementalStringPoolAtom*		_incrementalStringTableAtom;
 	class CodeSignatureAtom*				_codeSignatureAtom;
 
 };

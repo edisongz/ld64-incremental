@@ -2341,21 +2341,22 @@ void CodeSignatureAtom::hash(uint8_t* wholeFileBuffer) const
 template <typename A>
 class IncrementalInputsAtom : public LinkEditAtom {
 public:
-												IncrementalInputsAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
-													: LinkEditAtom(opts, state, writer, _s_section, 16), _opts(opts) {
-														this->_encoded = true;
-													}
-
+	using StringToOffset = std::unordered_map<const char *, uint32_t>;
+	IncrementalInputsAtom(const Options& opts, ld::Internal& state, OutputFile &writer, StringToOffset &stringTable)
+		: LinkEditAtom(opts, state, writer, _s_section, 8), _opts(opts), stringTable_(stringTable) {
+			this->_encoded = true;
+		}
 	virtual const char*							name() const		{ return "incremental inputs"; }
 	virtual void								encode() const;
 
 private:
-	typedef typename A::P						P;
-	typedef typename A::P::E					E;
-	typedef typename A::P::uint_t				pint_t;
-	const Options& 				_opts;
+	typedef typename A::P			P;
+	typedef typename A::P::E		E;
+	typedef typename A::P::uint_t	pint_t;
+	const Options &_opts;
+	StringToOffset &stringTable_;
 	
-	static ld::Section			_s_section;
+	static ld::Section _s_section;
 };
 
 template <typename A>
@@ -2363,8 +2364,9 @@ ld::Section IncrementalInputsAtom<A>::_s_section("__LINKEDIT", "__incr_inputs", 
 
 template <typename A>
 void IncrementalInputsAtom<A>::encode() const {
-	// atom map
+	// file map
 	std::unordered_map<std::string, const ld::File *> fileMap;
+	// atom map
 	std::unordered_map<std::string, std::vector<const ld::Atom *>> atomMap;
 	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); ++sit) {
 		ld::Internal::FinalSection *sect = *sit;
@@ -2404,9 +2406,10 @@ void IncrementalInputsAtom<A>::encode() const {
 				entry->setAtomCount(atomCount);
 				ld::incremental::incremental_atom_entry *atomPtr = entry->entryRef().u.relocObj->atoms;
 				for (auto ait = atoms.begin(); ait != atoms.end(); ait++) {
+					const ld::Atom *atom = *ait;
 					const ld::Internal::FinalSection& sect = static_cast<const ld::Internal::FinalSection&>((*ait)->section());
 					ld::incremental::AtomEntry<P> atomEntry;
-					atomEntry.setNameIndex(0);
+					atomEntry.setNameIndex(stringTable_[atom->name()]);
 					atomEntry.setFileOffset((*ait)->finalAddress() - sect.address + sect.fileOffset);
 					atomEntry.setSize((*ait)->size());
 					memcpy(atomPtr++, &atomEntry, sizeof(ld::incremental::AtomEntry<P>));
@@ -2443,11 +2446,11 @@ void IncrementalInputsAtom<A>::encode() const {
 template <typename A>
 class IncrementalFixupsAtom : public LinkEditAtom {
 public:
-												IncrementalFixupsAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
-													: LinkEditAtom(opts, state, writer, _s_section, 8), _opts(opts) {
-														this->_encoded = true;
-													}
-
+	using StringToOffset = std::unordered_map<const char *, uint32_t>;
+	IncrementalFixupsAtom(const Options &opts, ld::Internal &state, OutputFile &writer, StringToOffset &stringTable)
+		: LinkEditAtom(opts, state, writer, _s_section, 8), _opts(opts), stringTable_(stringTable) {
+			this->_encoded = true;
+		}
 	virtual const char*							name() const		{ return "incremental fixups"; }
 	virtual void								encode() const;
 
@@ -2456,10 +2459,10 @@ private:
 	typedef typename A::P::E					E;
 	typedef typename A::P::uint_t				pint_t;
 	const ld::Atom *targetAtomOfFixup(const ld::Fixup *fixup) const;
+	const Options &_opts;
+	StringToOffset &stringTable_;
 	
-	const Options& 				_opts;
-	
-	static ld::Section			_s_section;
+	static ld::Section _s_section;
 };
 
 template <typename A>
@@ -2502,27 +2505,6 @@ const ld::Atom *IncrementalFixupsAtom<A>::targetAtomOfFixup(const ld::Fixup *fix
 
 template <typename A>
 void IncrementalFixupsAtom<A>::encode() const {
-	// input files
-	uint32_t index = 0;
-	std::unordered_map<std::string, uint32_t> fileIndexMap;
-	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
-		if (!it->fromFileList) {
-			continue;
-		}
-		fileIndexMap[it->path] = index++;
-	}
-	
-	std::unordered_map<const char *, uint32_t> stringTable;
-	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
-		ld::Internal::FinalSection *sect = *sit;
-		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
-			const ld::Atom *atom = *ait;
-			if (stringTable.find(atom->name()) == stringTable.end()) {
-				stringTable[atom->name()] = index++;
-			}
-		}
-	}
-	
 	std::vector<ld::incremental::IncrFixupEntry<P>> fixups;
 	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
 		ld::Internal::FinalSection *sect = *sit;
@@ -2537,7 +2519,7 @@ void IncrementalFixupsAtom<A>::encode() const {
 				if (toTarget && toTarget->scope() != ld::Atom::scopeTranslationUnit && toTarget->file() && atom->file() != toTarget->file()) {
 					ld::incremental::IncrFixupEntry<P> entry;
 					entry.setAddress(fileOffset + fit->offsetInAtom);
-					entry.setNameIndex(stringTable[toTarget->name()]);
+					entry.setNameIndex(stringTable_[toTarget->name()]);
 					fixups.push_back(entry);
 				}
 			}
@@ -2558,10 +2540,11 @@ void IncrementalFixupsAtom<A>::encode() const {
 template <typename A>
 class IncrementalSymTabAtom : public LinkEditAtom {
 public:
-	IncrementalSymTabAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
-														: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)), _opts(opts) {
-															this->_encoded = true;
-													   }
+	using StringToOffset = std::unordered_map<const char *, uint32_t>;
+	IncrementalSymTabAtom(const Options& opts, ld::Internal& state, OutputFile& writer, StringToOffset &stringTable)
+		: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)), _opts(opts), stringTable_(stringTable) {
+			this->_encoded = true;
+	   }
 
 	virtual const char*							name() const		{ return "incremental global symbol table"; }
 	virtual void								encode() const;
@@ -2573,6 +2556,7 @@ private:
 	const ld::Atom *targetAtomOfFixup(const ld::Fixup *fixup) const;
 	
 	const Options& 				_opts;
+	StringToOffset&				stringTable_;
 	
 	static ld::Section			_s_section;
 };
@@ -2627,15 +2611,11 @@ void IncrementalSymTabAtom<A>::encode() const {
 		fileIndexMap[it->path] = index++;
 	}
 	
-	std::unordered_map<const char *, uint32_t> stringTable;
 	std::unordered_map<const char *, std::set<uint32_t>> symbolTable;
 	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
 		ld::Internal::FinalSection *sect = *sit;
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
 			const ld::Atom *atom = *ait;
-			if (stringTable.find(atom->name()) == stringTable.end()) {
-				stringTable[atom->name()] = index++;
-			}
 			if (!atom->file() || atom->size() == 0) {
 				continue;
 			}
@@ -2657,7 +2637,7 @@ void IncrementalSymTabAtom<A>::encode() const {
 	
 	for (auto it = symbolTable.begin(); it != symbolTable.end(); it++) {
 		ld::incremental::GlobalSymbolTableEntry<P> *entry = (ld::incremental::GlobalSymbolTableEntry<P> *)malloc((it->second.size() + 2) * sizeof(uint32_t));
-		entry->setSymbolIndexInStringTable_(stringTable[it->first]);
+		entry->setSymbolIndexInStringTable_(stringTable_[it->first]);
 		entry->setReferencedFileCount_(static_cast<uint32_t>(it->second.size()));
 		entry->setReferencedFileIndex_(it->second);
 		this->_encodedData.append_mem(entry, (entry->referencedFileCount_() + 2) * sizeof(uint32_t));
@@ -2672,10 +2652,10 @@ void IncrementalSymTabAtom<A>::encode() const {
 template <typename A>
 class IncrementalPatchSpaceAtom : public LinkEditAtom {
 public:
-												IncrementalPatchSpaceAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
-													: LinkEditAtom(opts, state, writer, _s_section, 16), _opts(opts) {
-														this->_encoded = true;
-													}
+	IncrementalPatchSpaceAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+		: LinkEditAtom(opts, state, writer, _s_section, 16), _opts(opts) {
+			this->_encoded = true;
+		}
 
 	virtual const char*							name() const		{ return "incremental patch space atom"; }
 	virtual void								encode() const;
@@ -2684,7 +2664,7 @@ private:
 	typedef typename A::P						P;
 	typedef typename A::P::E					E;
 	typedef typename A::P::uint_t				pint_t;
-	const Options& 				_opts;
+	const Options &_opts;
 	
 	static ld::Section			_s_section;
 };
@@ -2716,53 +2696,51 @@ void IncrementalPatchSpaceAtom<A>::encode() const {
 	this->_encoded = true;
 }
 
-template <typename A>
 class IncrementalStringPoolAtom : public LinkEditAtom {
 public:
-													IncrementalStringPoolAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
-														: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)), _opts(opts) {
-															this->_encoded = true;
-													   }
+	using StringToOffset = std::unordered_map<const char *, uint32_t>;
+	IncrementalStringPoolAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+		: LinkEditAtom(opts, state, writer, _s_section, 8), _opts(opts) {
+			this->_encoded = true;
+	   }
 
 	virtual const char*							name() const		{ return "incremental string pool"; }
 	virtual void								encode() const;
+	constexpr StringToOffset& 					incrementalStrings() { return stringTable_; }
 
 private:
-	typedef typename A::P						P;
-	typedef typename A::P::E					E;
-	typedef typename A::P::uint_t				pint_t;
 	const Options& 				_opts;
+	mutable StringToOffset 		stringTable_;
 	
 	static ld::Section			_s_section;
 };
 
-template <typename A>
-ld::Section IncrementalStringPoolAtom<A>::_s_section("__LINKEDIT", "__incr_strtab", ld::Section::typeLinkEdit, true);
+ld::Section IncrementalStringPoolAtom::_s_section("__LINKEDIT", "__incr_strpool", ld::Section::typeLinkEdit, true);
 
-template <typename A>
-void IncrementalStringPoolAtom<A>::encode() const {
+void IncrementalStringPoolAtom::encode() const {
+	uint32_t index = 0;
 	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
 		if (!it->fromFileList) {
 			continue;
 		}
+		stringTable_[it->path] = index++;
 		this->_encodedData.append_mem(it->path, strlen(it->path));
 		this->_encodedData.append_mem("\0", 1);
 	}
 	
-	std::unordered_map<const char *, bool> stringTable;
 	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
 		ld::Internal::FinalSection *sect = *sit;
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
 			const ld::Atom *atom = *ait;
-			if (stringTable.find(atom->name()) == stringTable.end()) {
-				stringTable[atom->name()] = true;
+			if (stringTable_.find(atom->name()) == stringTable_.end()) {
+				stringTable_[atom->name()] = index++;
 				this->_encodedData.append_mem(atom->name(), strlen(atom->name()));
 				this->_encodedData.append_mem("\0", 1);
 			}
 		}
 	}
 	
-	this->_encodedData.pad_to_size(sizeof(pint_t));
+	this->_encodedData.pad_to_size(8);
 	this->_encoded = true;
 }
 
