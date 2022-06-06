@@ -9,44 +9,10 @@
 #ifndef __INCREMENTAL_HPP__
 #define __INCREMENTAL_HPP__
 
-#include <AvailabilityMacros.h>
-#include <dlfcn.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <limits.h>
-#include <mach-o/dyld.h>
-#include <mach-o/fat.h>
-#include <mach/mach_host.h>
-#include <mach/mach_init.h>
-#include <mach/mach_time.h>
-#include <mach/vm_statistics.h>
-#include <stdlib.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/sysctl.h>
-#include <unistd.h>
-
-#include <algorithm>
-#include <list>
-#include <map>
-#include <set>
-#include <string>
-#include <tuple>
-#include <vector>
-
-#include "Architectures.hpp"
-#include "InputFiles.h"
-#include "configure.h"
-#include "macho_incremental_abstraction.hpp"
+#include "macho_incremental_file.hpp"
 
 namespace ld {
 namespace incremental {
-
-using IncrFixupsMap = std::unordered_map<std::string, std::vector<IncrFixup>>;
-using SymbolSectionOffset =
-    std::unordered_map<uint8_t, std::unordered_map<std::string, uint64_t>>;
-using BindingInfoTuple =
-    std::tuple<uint8_t, int, const char *, bool, uint64_t, int64_t>;
 
 class Incremental {
  public:
@@ -62,6 +28,7 @@ class Incremental {
   constexpr PatchSpace &patchSpace(const char *sectName) {
     return patchSpace_[sectName];
   }
+  // Compatible for legacy code
   void forEachStubAtom(ld::File::AtomHandler &handler, ld::Internal &state);
   void forEachStubAtom(const std::function<void(const ld::Atom *)> &handler);
   void forEachRefsAtom(ld::File::AtomHandler &handler, ld::Internal &state);

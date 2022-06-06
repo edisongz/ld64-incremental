@@ -464,6 +464,8 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 	}
 
 	if (_hasIncrementalLink) {
+		assert(_incrementalStringTableAtom != nullptr);
+		_incrementalStringTableAtom->encode();
 		assert(_incrementalAtom != nullptr);
 		_incrementalAtom->encode();
 		assert(_incrementalFixupsAtom != nullptr);
@@ -472,8 +474,6 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 		_incrementalSymTabAtom->encode();
 		assert(_incrementalPatchSpaceAtom != nullptr);
 		_incrementalPatchSpaceAtom->encode();
-		assert(_incrementalStringTableAtom != nullptr);
-		_incrementalStringTableAtom->encode();
 	}
 	
 	// update address and file offsets now that linkedit content has been generated

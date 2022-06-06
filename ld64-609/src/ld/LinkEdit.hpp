@@ -2396,7 +2396,7 @@ void IncrementalInputsAtom<A>::encode() const {
 		size_t entrySize = 0;
 		switch (file->type()) {
 			case ld::File::Reloc: {
-				std::vector<const ld::Atom *> atoms = atomMap[it->path];
+				auto &atoms = atomMap[it->path];
 				uint32_t atomCount = static_cast<uint32_t>(atoms.size());
 				entrySize = 5 * sizeof(uint32_t) + sizeof(ld::incremental::AtomEntry<P>) * atomCount;
 				ld::incremental::InputEntrySection<P> *entry = (ld::incremental::InputEntrySection<P> *)malloc(entrySize);
@@ -2718,12 +2718,11 @@ private:
 ld::Section IncrementalStringPoolAtom::_s_section("__LINKEDIT", "__incr_strpool", ld::Section::typeLinkEdit, true);
 
 void IncrementalStringPoolAtom::encode() const {
-	uint32_t index = 0;
 	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
 		if (!it->fromFileList) {
 			continue;
 		}
-		stringTable_[it->path] = index++;
+		stringTable_[it->path] = this->_encodedData.size();
 		this->_encodedData.append_mem(it->path, strlen(it->path));
 		this->_encodedData.append_mem("\0", 1);
 	}
@@ -2733,7 +2732,7 @@ void IncrementalStringPoolAtom::encode() const {
 		for (auto ait = sect->atoms.begin(); ait != sect->atoms.end(); ait++) {
 			const ld::Atom *atom = *ait;
 			if (stringTable_.find(atom->name()) == stringTable_.end()) {
-				stringTable_[atom->name()] = index++;
+				stringTable_[atom->name()] = this->_encodedData.size();
 				this->_encodedData.append_mem(atom->name(), strlen(atom->name()));
 				this->_encodedData.append_mem("\0", 1);
 			}
