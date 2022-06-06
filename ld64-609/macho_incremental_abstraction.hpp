@@ -17,21 +17,22 @@ namespace ld {
 namespace incremental {
 
 #pragma pack(1)
-struct IncrAtomEntry {
-  uint32_t atomNameIndex_;
-  uint64_t atomFileOffset_;
-  uint64_t atomSize_;
+/// Atom entry
+struct incremental_atom_entry {
+  uint32_t name_index;
+  uint64_t file_offset;
+  uint32_t size;
 };
 
 /// Input entry
-struct InputEntry {
+struct incremental_input_entry {
   uint32_t fileIndexInStringTable_;  // file index in incremental string table
   uint64_t modTime_;                 // last link input file modification time
-  uint32_t type_;
+  uint32_t type_;                    // input file type
 
   struct RelocObj {
     uint32_t atomCount_;
-    IncrAtomEntry atoms[0];
+    incremental_atom_entry atoms[0];
   };
 
   union {
@@ -95,27 +96,23 @@ struct SectionBoundary {
 template <typename P>
 class AtomEntry {
  public:
-  uint32_t atomNameIndex() const INLINE {
-    return E::get32(entry.atomNameIndex_);
-  }
-  void setAtomNameIndex_(uint32_t value) INLINE {
-    E::set32(entry.atomNameIndex_, value);
+  uint32_t nameIndex() const INLINE { return E::get32(entry.name_index); }
+  void setNameIndex(uint32_t value) INLINE {
+    E::set32(entry.name_index, value);
   }
 
-  uint64_t atomFileOffset() const INLINE {
-    return E::get64(entry.atomFileOffset_);
-  }
-  void setAtomFileOffset(uint64_t value) INLINE {
-    E::set64(entry.atomFileOffset_, value);
+  uint64_t fileOffset() const INLINE { return E::get64(entry.file_offset); }
+  void setFileOffset(uint64_t value) INLINE {
+    E::set64(entry.file_offset, value);
   }
 
-  uint64_t atomSize() const INLINE { return E::get64(entry.atomSize_); }
-  void setAtomSize(uint64_t value) INLINE { E::set64(entry.atomSize_, value); }
+  uint32_t size() const INLINE { return E::get32(entry.size); }
+  void setSize(uint32_t value) INLINE { E::set32(entry.size, value); }
 
   typedef typename P::E E;
 
  private:
-  IncrAtomEntry entry;
+  incremental_atom_entry entry;
 };
 
 // Incremental input entry command
@@ -146,24 +143,25 @@ class InputEntrySection {
 
   std::vector<AtomEntry<P>> atoms() const {
     std::vector<AtomEntry<P>> v;
-    IncrAtomEntry *p = (IncrAtomEntry *)entry.u.relocObj->atoms;
+    incremental_atom_entry *p =
+        (incremental_atom_entry *)entry.u.relocObj->atoms;
     for (uint32_t i = 0; i < atomCount(); i++) {
       AtomEntry<P> atom;
-      atom.setAtomNameIndex_(p->atomNameIndex_);
-      atom.setAtomFileOffset(p->atomFileOffset_);
-      atom.setAtomSize(p->atomSize_);
+      atom.setAtomNameIndex_(p->name_index);
+      atom.setAtomFileOffset(p->file_offset);
+      atom.setAtomSize(p->size);
       v.push_back(atom);
       p++;
     }
     return v;
   }
 
-  InputEntry &entryRef() { return entry; }
+  incremental_input_entry &entryRef() { return entry; }
 
   typedef typename P::E E;
 
  private:
-  InputEntry entry;
+  incremental_input_entry entry;
 };
 
 template <typename P>

@@ -2402,13 +2402,13 @@ void IncrementalInputsAtom<A>::encode() const {
 				entry->setModTime(it->modTime);
 				entry->setType(file->type());
 				entry->setAtomCount(atomCount);
-				ld::incremental::IncrAtomEntry *atomPtr = entry->entryRef().u.relocObj->atoms;
+				ld::incremental::incremental_atom_entry *atomPtr = entry->entryRef().u.relocObj->atoms;
 				for (auto ait = atoms.begin(); ait != atoms.end(); ait++) {
 					const ld::Internal::FinalSection& sect = static_cast<const ld::Internal::FinalSection&>((*ait)->section());
 					ld::incremental::AtomEntry<P> atomEntry;
-					atomEntry.setAtomNameIndex_(0);
-					atomEntry.setAtomFileOffset((*ait)->finalAddress() - sect.address + sect.fileOffset);
-					atomEntry.setAtomSize((*ait)->size());
+					atomEntry.setNameIndex(0);
+					atomEntry.setFileOffset((*ait)->finalAddress() - sect.address + sect.fileOffset);
+					atomEntry.setSize((*ait)->size());
 					memcpy(atomPtr++, &atomEntry, sizeof(ld::incremental::AtomEntry<P>));
 				}
 				this->_encodedData.append_mem(entry, entrySize);
@@ -2417,19 +2417,19 @@ void IncrementalInputsAtom<A>::encode() const {
 			}
 				break;
 			case ld::File::Archive: {
-				ld::incremental::InputEntry entry;
+				ld::incremental::incremental_input_entry entry;
 				entry.fileIndexInStringTable_ = index++;
 				entry.modTime_ = it->modTime;
 				entry.type_ = file->type();
-				this->_encodedData.append_mem(&entry, sizeof(ld::incremental::InputEntry));
+				this->_encodedData.append_mem(&entry, sizeof(ld::incremental::incremental_input_entry));
 			}
 				break;
 			case ld::File::Dylib: {
-				ld::incremental::InputEntry entry;
+				ld::incremental::incremental_input_entry entry;
 				entry.fileIndexInStringTable_ = index++;
 				entry.modTime_ = it->modTime;
 				entry.type_ = file->type();
-				this->_encodedData.append_mem(&entry, sizeof(ld::incremental::InputEntry));
+				this->_encodedData.append_mem(&entry, sizeof(ld::incremental::incremental_input_entry));
 			}
 				break;
 			default:
