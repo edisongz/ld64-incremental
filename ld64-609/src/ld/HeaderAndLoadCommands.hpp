@@ -35,7 +35,7 @@
 #include "MachOFileAbstraction.hpp"
 #include "Options.h"
 #include "ld.hpp"
-#include "incremental.hpp"
+#include "macho_incremental_abstraction.hpp"
 
 namespace ld {
 namespace tool {

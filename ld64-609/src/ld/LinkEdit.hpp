@@ -41,7 +41,7 @@
 #include "Architectures.hpp"
 #include "MachOFileAbstraction.hpp"
 #include "libcodedirectory.h"
-#include "incremental.hpp"
+#include "macho_incremental_abstraction.hpp"
 
 #ifndef CS_LINKER_SIGNED
 	#define CS_LINKER_SIGNED            0x00020000  /* Automatically signed by the linker */
