@@ -105,6 +105,11 @@ class Incremental {
       const std::function<void(const std::string &)> &handler);
 
   void UpdateIndirectSymbolIndex(const char *sectionName, uint32_t index);
+  
+ private:
+  /// Find atoms which reference the changed atom
+  /// @param changeAtom Changed atom
+  void findReferencedAtoms(const ld::Atom *changeAtom);
 
  private:
   Options &_options;

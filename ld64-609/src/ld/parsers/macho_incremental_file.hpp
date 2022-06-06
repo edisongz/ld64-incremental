@@ -120,16 +120,16 @@ class ObjCClass {
 //
 class RefsProxyAtom : public ld::Atom {
  public:
-  RefsProxyAtom(const char *nm, uint64_t size)
+  RefsProxyAtom(const char *name, uint64_t size)
       : ld::Atom(_s_section, ld::Atom::definitionRegular,
                  ld::Atom::combineNever, ld::Atom::scopeLinkageUnit,
                  ld::Atom::typeZeroFill, ld::Atom::symbolTableNotIn, false,
                  false, false, ld::Atom::Alignment(0)),
-        _name(nm),
+        name_(name),
         size_(size) {}
   // overrides of ld::Atom
   virtual const ld::File *file() const { return nullptr; }
-  virtual const char *name() const { return _name; }
+  virtual const char *name() const { return name_; }
   virtual uint64_t size() const { return size_; }
   virtual uint64_t objectAddress() const { return 0; }
   virtual void copyRawContent(uint8_t buffer[]) const {}
@@ -137,7 +137,34 @@ class RefsProxyAtom : public ld::Atom {
 
  protected:
   virtual ~RefsProxyAtom() {}
-  const char *_name;
+  const char *name_;
+  uint64_t size_;
+  static ld::Section _s_section;
+};
+
+/// Incremental atom
+/// It's an atom exist in incremental macho file, which reference the changed input atoms
+class IncrementalAtom : public ld::Atom {
+ public:
+    IncrementalAtom(const char *name, uint64_t size)
+      : ld::Atom(_s_section, ld::Atom::definitionRegular,
+                 ld::Atom::combineNever, ld::Atom::scopeLinkageUnit,
+                 ld::Atom::typeUnclassified, ld::Atom::symbolTableNotIn, false,
+                 false, false, ld::Atom::Alignment(0)),
+        name_(name),
+        size_(size) {}
+  // overrides of ld::Atom
+  virtual const ld::File *file() const { return nullptr; }
+  virtual const char *name() const { return name_; }
+  virtual uint64_t size() const { return size_; }
+  virtual uint64_t objectAddress() const { return 0; }
+  virtual void copyRawContent(uint8_t buffer[]) const {}
+  virtual void setScope(Scope) {}
+  bool isIncremental() const { return true; }
+
+ protected:
+  virtual ~IncrementalAtom() {}
+  const char *name_;
   uint64_t size_;
   static ld::Section _s_section;
 };
@@ -993,8 +1020,8 @@ void Parser<A>::parseIncrementalInputsSection(
         break;
     }
     incrInputs_.push_back(incrInputPtr);
-    incrInputsMap_[incrStringPool_[incrInputPtr->fileIndexInStringTable()]] =
-        incrInputPtr;
+    const char *symName = &fIncrementalStrings_[incrInputPtr->fileIndexInStringTable()];
+    incrInputsMap_[symName] = incrInputPtr;
     incrInputPtr = (InputEntrySection<P> *)(((uint8_t *)incrInputPtr) + size);
   }
 }
@@ -1006,7 +1033,7 @@ void Parser<A>::parseIncrementalFixupSection(
       (const InputFileFixupSection<P> *)((uint8_t *)fHeader_ +
                                          incrementalCommand->fixups_off());
   incrementalFixupSection_->forEachFixup([&](const IncrFixupEntry<P> &fixup) {
-    std::string key = incrStringPool_[fixup.nameIndex()];
+    const char *key = &fIncrementalStrings_[fixup.nameIndex()];
     if (incrFixupsMap_.find(key) == incrFixupsMap_.end()) {
       std::vector<IncrFixup> fixups;
       fixups.push_back({fixup.address(), fixup.nameIndex()});
@@ -1055,8 +1082,7 @@ void Parser<A>::parseIncrementalGlobalSymbols(
                                           incrementalCommand->symtab_off());
   GlobalSymbolTableEntry<P> *symbolStart =
       const_cast<GlobalSymbolTableEntry<P> *>(fIncrementalSymbolSection_);
-  const GlobalSymbolTableEntry<P> *symbolEnd =
-      (const GlobalSymbolTableEntry<P> *)((uint8_t *)fHeader_ +
+  const GlobalSymbolTableEntry<P> *symbolEnd = reinterpret_cast<const GlobalSymbolTableEntry<P> *>((uint8_t *)fHeader_ +
                                           incrementalCommand->symtab_off() +
                                           incrementalCommand->symtab_size());
   while (symbolStart < symbolEnd) {
@@ -1067,7 +1093,7 @@ void Parser<A>::parseIncrementalGlobalSymbols(
     symbolStart =
         (GlobalSymbolTableEntry<P> *)(((uint8_t *)symbolStart) +
                                       (2 +
-                                       symbolStart->referencedFileCount_()) *
+                                       symbolStart->referencedAtomCount()) *
                                           sizeof(uint32_t));
   }
 }

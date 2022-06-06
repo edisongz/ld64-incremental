@@ -54,7 +54,7 @@ struct InputFileFixup {
 /// Global symbol entry
 struct GlobalSymbolRefEntry {
   uint32_t symbolIndexInStringTable_;
-  uint32_t referencedFileCount_;
+  uint32_t referencedAtomCount;
   uint32_t referencedFileIndex_[0];
 };
 
@@ -208,11 +208,6 @@ class InputFileFixupSection {
 template <typename P>
 class GlobalSymbolTableEntry {
  public:
-  GlobalSymbolTableEntry(uint32_t symbolIndex, uint32_t fileCount) {
-    this->setSymbolIndexInStringTable_(symbolIndex);
-    this->setReferencedFileCount_(fileCount);
-  }
-
   uint32_t symbolIndexInStringTable_() const INLINE {
     return E::get32(entry.symbolIndexInStringTable_);
   }
@@ -220,17 +215,17 @@ class GlobalSymbolTableEntry {
     E::set32(entry.symbolIndexInStringTable_, value);
   }
 
-  uint32_t referencedFileCount_() const INLINE {
-    return E::get32(entry.referencedFileCount_);
+  uint32_t referencedAtomCount() const INLINE {
+    return E::get32(entry.referencedAtomCount);
   }
-  void setReferencedFileCount_(uint32_t value) INLINE {
-    E::set32(entry.referencedFileCount_, value);
+  void setReferencedAtomCount(uint32_t value) INLINE {
+    E::set32(entry.referencedAtomCount, value);
   }
 
   const std::set<uint32_t> referencedFileIndex_() const INLINE {
     std::set<uint32_t> v;
     uint32_t *p = (uint32_t *)entry.referencedFileIndex_;
-    for (uint32_t i = 0; i < referencedFileCount_(); i++) {
+    for (uint32_t i = 0; i < referencedAtomCount(); i++) {
       v.insert(E::get32(*p++));
     }
     return v;

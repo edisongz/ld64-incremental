@@ -279,5 +279,9 @@ void Incremental::updateDylibOrdinal(
   }
 }
 
+void Incremental::findReferencedAtoms(const ld::Atom *changeAtom) {
+  // TODO: find all of referenced atoms
+}
+
 }  // namespace incremental
 }  // namespace ld

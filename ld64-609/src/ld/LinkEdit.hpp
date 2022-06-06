@@ -2541,8 +2541,8 @@ template <typename A>
 class IncrementalSymTabAtom : public LinkEditAtom {
 public:
 	using StringToOffset = std::unordered_map<const char *, uint32_t>;
-	IncrementalSymTabAtom(const Options& opts, ld::Internal& state, OutputFile& writer, StringToOffset &stringTable)
-		: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)), _opts(opts), stringTable_(stringTable) {
+	IncrementalSymTabAtom(const Options &opts, ld::Internal &state, OutputFile &writer, StringToOffset &stringTable)
+		: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)), opts_(opts), stringTable_(stringTable) {
 			this->_encoded = true;
 	   }
 
@@ -2555,10 +2555,10 @@ private:
 	typedef typename A::P::uint_t				pint_t;
 	const ld::Atom *targetAtomOfFixup(const ld::Fixup *fixup) const;
 	
-	const Options& 				_opts;
-	StringToOffset&				stringTable_;
+	const Options &opts_;
+	StringToOffset &stringTable_;
 	
-	static ld::Section			_s_section;
+	static ld::Section _s_section;
 };
 
 template <typename A>
@@ -2567,7 +2567,7 @@ ld::Section IncrementalSymTabAtom<A>::_s_section("__LINKEDIT", "__incr_symtab", 
 template <typename A>
 const ld::Atom *IncrementalSymTabAtom<A>::targetAtomOfFixup(const ld::Fixup *fixup) const {
 	// FIXME: Is this right for makeThreadedStartsSection?
-	if ( !_opts.makeCompressedDyldInfo() && !_opts.makeThreadedStartsSection() && !_opts.makeChainedFixups() ) {
+	if ( !opts_.makeCompressedDyldInfo() && !opts_.makeThreadedStartsSection() && !opts_.makeChainedFixups() ) {
 		// For external relocations the classic mach-o format
 		// has addend only stored in the content.  That means
 		// that the address of the target is not used.
@@ -2601,16 +2601,6 @@ const ld::Atom *IncrementalSymTabAtom<A>::targetAtomOfFixup(const ld::Fixup *fix
 
 template <typename A>
 void IncrementalSymTabAtom<A>::encode() const {
-	// input files
-	uint32_t index = 0;
-	std::unordered_map<std::string, uint32_t> fileIndexMap;
-	for (auto it = _opts.getInputFiles().begin(); it != _opts.getInputFiles().end(); it++) {
-		if (!it->fromFileList) {
-			continue;
-		}
-		fileIndexMap[it->path] = index++;
-	}
-	
 	std::unordered_map<const char *, std::set<uint32_t>> symbolTable;
 	for (auto sit = _state.sections.begin(); sit != _state.sections.end(); sit++) {
 		ld::Internal::FinalSection *sect = *sit;
@@ -2622,25 +2612,25 @@ void IncrementalSymTabAtom<A>::encode() const {
 			for (auto fit = atom->fixupsBegin(); fit != atom->fixupsEnd(); fit++) {
 				const ld::Atom *toTarget = targetAtomOfFixup(fit);
 				if (toTarget && toTarget->scope() != ld::Atom::scopeTranslationUnit && toTarget->file() && atom->file() != toTarget->file()) {
-					auto referenceFileIt = symbolTable.find(toTarget->name());
-					if (referenceFileIt != symbolTable.end()) {
-						referenceFileIt->second.insert(fileIndexMap[atom->file()->path()]);
+					auto &referenceFileIt = symbolTable[toTarget->name()];
+					if (symbolTable.find(toTarget->name()) != symbolTable.end()) {
+						referenceFileIt.insert(stringTable_[atom->name()]);
 					} else {
-						std::set<uint32_t> fileSet;
-						fileSet.insert(fileIndexMap[atom->file()->path()]);
-						symbolTable[toTarget->name()] = fileSet;
+						std::set<uint32_t> atomSet;
+						atomSet.insert(stringTable_[atom->name()]);
+						symbolTable[toTarget->name()] = atomSet;
 					}
 				}
 			}
 		}
 	}
 	
-	for (auto it = symbolTable.begin(); it != symbolTable.end(); it++) {
-		ld::incremental::GlobalSymbolTableEntry<P> *entry = (ld::incremental::GlobalSymbolTableEntry<P> *)malloc((it->second.size() + 2) * sizeof(uint32_t));
-		entry->setSymbolIndexInStringTable_(stringTable_[it->first]);
-		entry->setReferencedFileCount_(static_cast<uint32_t>(it->second.size()));
-		entry->setReferencedFileIndex_(it->second);
-		this->_encodedData.append_mem(entry, (entry->referencedFileCount_() + 2) * sizeof(uint32_t));
+	for (auto &it: symbolTable) {
+		auto entry = reinterpret_cast<ld::incremental::GlobalSymbolTableEntry<P> *>(malloc((it.second.size() + 2) * sizeof(uint32_t)));
+		entry->setSymbolIndexInStringTable_(stringTable_[it.first]);
+		entry->setReferencedAtomCount(static_cast<uint32_t>(it.second.size()));
+		entry->setReferencedFileIndex_(it.second);
+		this->_encodedData.append_mem(entry, (entry->referencedAtomCount() + 2) * sizeof(uint32_t));
 		free(entry);
 		entry = nullptr;
 	}

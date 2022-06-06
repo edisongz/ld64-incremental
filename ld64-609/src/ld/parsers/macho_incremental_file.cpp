@@ -14,6 +14,8 @@ namespace incremental {
 ld::Section RefsProxyAtom::_s_section("__DATA", "__objc_classrefs",
                                       ld::Section::typePageZero, true);
 
+ld::Section IncrementalAtom::_s_section("__PAGEZERO", "__pagezero", ld::Section::typeUnclassified, true);
+
 template <>
 bool Parser<x86>::validFile(const uint8_t *fileContent) {
   const macho_header<P> *header = reinterpret_cast<const macho_header<P> *>(fileContent);
