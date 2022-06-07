@@ -147,6 +147,7 @@ void Incremental::openBinary() {
       objcClassRefsAtoms_ = parser.objcClassRefsAtoms();
       stubNames_ = parser.stubNames();
       incrFixupsMap_ = parser.incrFixupsMap();
+      incrReferencedMap_ = parser.incrReferencedMap();
       baseAddress_ = parser.baseAddress();
       segmentBoundaries_ = parser.segmentBoundaries();
       sectionBoundaryMap_ = parser.sectionBoundaryMap();
@@ -161,6 +162,7 @@ void Incremental::openBinary() {
       symToSectionOffset_ = parser.symToSectionOffset();
       symbolTypeToOffset_ = parser.symbolTypeToOffset();
       stringPool_ = parser.stringPool();
+      incrStringPool_ = parser.incrStringPool();
       currentBufferUsed_ = parser.currentBufferUsed();
       // Stubs
       got_section_ = parser.GotSection();
@@ -280,7 +282,13 @@ void Incremental::updateDylibOrdinal(
 }
 
 void Incremental::findReferencedAtoms(const ld::Atom *changeAtom) {
-  // TODO: find all of referenced atoms
+  if (incrStringPool_.find(changeAtom->name()) == incrStringPool_.end()) {
+    return;
+  }
+  uint32_t stringOffset = incrStringPool_[changeAtom->name()];
+  auto &changedAtomSet = incrReferencedMap_[stringOffset];
+  // construct referenced atom
+  
 }
 
 }  // namespace incremental

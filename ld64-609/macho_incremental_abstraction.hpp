@@ -51,11 +51,11 @@ struct InputFileFixup {
   IncrFixup fixups_[0];
 };
 
-/// Global symbol entry
-struct GlobalSymbolRefEntry {
+/// Symbol referenced entry
+struct symbol_referenced_entry {
   uint32_t symbolIndexInStringTable_;
   uint32_t referencedAtomCount;
-  uint32_t referencedFileIndex_[0];
+  uint32_t referencedAtomSet[0];
 };
 
 /// Incremental patch space
@@ -222,17 +222,17 @@ class GlobalSymbolTableEntry {
     E::set32(entry.referencedAtomCount, value);
   }
 
-  const std::set<uint32_t> referencedFileIndex_() const INLINE {
+  const std::set<uint32_t> referencedAtomSet() const INLINE {
     std::set<uint32_t> v;
-    uint32_t *p = (uint32_t *)entry.referencedFileIndex_;
+    uint32_t *p = (uint32_t *)entry.referencedAtomSet;
     for (uint32_t i = 0; i < referencedAtomCount(); i++) {
       v.insert(E::get32(*p++));
     }
     return v;
   }
 
-  void setReferencedFileIndex_(const std::set<uint32_t> &buffer) {
-    uint32_t *p = (uint32_t *)entry.referencedFileIndex_;
+  void setReferencedAtomSet(const std::set<uint32_t> &buffer) {
+    uint32_t *p = (uint32_t *)entry.referencedAtomSet;
     for (auto it = buffer.begin(); it != buffer.end(); it++) {
       E::set32(*p++, *it);
     }
@@ -241,7 +241,7 @@ class GlobalSymbolTableEntry {
   typedef typename P::E E;
 
  private:
-  struct GlobalSymbolRefEntry entry;
+  struct symbol_referenced_entry entry;
 };
 
 template <typename P>

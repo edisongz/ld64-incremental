@@ -105,7 +105,7 @@ class Incremental {
       const std::function<void(const std::string &)> &handler);
 
   void UpdateIndirectSymbolIndex(const char *sectionName, uint32_t index);
-  
+
  private:
   /// Find atoms which reference the changed atom
   /// @param changeAtom Changed atom
@@ -119,11 +119,13 @@ class Incremental {
   size_t machoNlistSize_{0};
   uint32_t symbolCount_{0};
   /// ObjC class section offset map
-  std::unordered_map<std::string, uint32_t> objcClassSectionOffsetMap_;
+  StringToOffset objcClassSectionOffsetMap_;
   IncrFixupsMap incrFixupsMap_;
+  IncrReferencedMap incrReferencedMap_;
   std::unordered_map<std::string, PatchSpace> patchSpace_;
   std::vector<const ld::Atom *> stubAtoms_;
   std::vector<const ld::Atom *> objcClassRefsAtoms_;
+  std::vector<const ld::Atom *> referencedAtoms_;
   std::unordered_set<std::string> stubNames_;
   std::vector<SegmentBoundary> segmentBoundaries_;
   std::unordered_map<std::string, SectionBoundary> sectionBoundaryMap_;
@@ -135,7 +137,8 @@ class Incremental {
   std::unordered_map<std::string, int> dylibNameToOrdinal_;
   SymbolSectionOffset symToSectionOffset_;
   std::unordered_map<uint8_t, uint32_t> symbolTypeToOffset_;
-  std::unordered_map<std::string, uint32_t> stringPool_;
+  StringToOffset stringPool_;
+  StringToOffset incrStringPool_;
   std::vector<std::string> appendStrings_;
   uint32_t currentBufferUsed_{0};
 #if SUPPORT_ARCH_arm64

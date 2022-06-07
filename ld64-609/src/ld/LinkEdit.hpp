@@ -2629,7 +2629,7 @@ void IncrementalSymTabAtom<A>::encode() const {
 		auto entry = reinterpret_cast<ld::incremental::GlobalSymbolTableEntry<P> *>(malloc((it.second.size() + 2) * sizeof(uint32_t)));
 		entry->setSymbolIndexInStringTable_(stringTable_[it.first]);
 		entry->setReferencedAtomCount(static_cast<uint32_t>(it.second.size()));
-		entry->setReferencedFileIndex_(it.second);
+		entry->setReferencedAtomSet(it.second);
 		this->_encodedData.append_mem(entry, (entry->referencedAtomCount() + 2) * sizeof(uint32_t));
 		free(entry);
 		entry = nullptr;

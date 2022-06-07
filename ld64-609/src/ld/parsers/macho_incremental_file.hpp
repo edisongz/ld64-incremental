@@ -27,10 +27,12 @@ namespace ld {
 namespace incremental {
 
 using IncrFixupsMap = std::unordered_map<std::string, std::vector<IncrFixup>>;
+using IncrReferencedMap = std::unordered_map<uint32_t, std::set<uint32_t>>;
 using SymbolSectionOffset =
     std::unordered_map<uint8_t, std::unordered_map<std::string, uint64_t>>;
 using BindingInfoTuple =
     std::tuple<uint8_t, int, const char *, bool, uint64_t, int64_t>;
+using StringToOffset = std::unordered_map<std::string, uint32_t>;
 
 static inline uint64_t read_uleb128(const uint8_t *&p, const uint8_t *end) {
   uint64_t result = 0;
@@ -143,10 +145,11 @@ class RefsProxyAtom : public ld::Atom {
 };
 
 /// Incremental atom
-/// It's an atom exist in incremental macho file, which reference the changed input atoms
+/// It's an atom exist in incremental macho file, which reference the changed
+/// input atoms
 class IncrementalAtom : public ld::Atom {
  public:
-    IncrementalAtom(const char *name, uint64_t size)
+  IncrementalAtom(const char *name, uint64_t size)
       : ld::Atom(_s_section, ld::Atom::definitionRegular,
                  ld::Atom::combineNever, ld::Atom::scopeLinkageUnit,
                  ld::Atom::typeUnclassified, ld::Atom::symbolTableNotIn, false,
@@ -187,11 +190,12 @@ class Parser {
   /// Symol table item size
   size_t MachONlistSize() const { return sizeof(macho_nlist<P>); }
   uint32_t symbolCount() const { return symbolCount_; }
-  IncrInputMap &incrInputsMap() { return incrInputsMap_; }
-  constexpr std::unordered_map<std::string, uint32_t> &objcClassIndexMap() {
-    return objcClassIndexMap_;
-  }
+  constexpr IncrInputMap &incrInputsMap() { return incrInputsMap_; }
+  constexpr StringToOffset &objcClassIndexMap() { return objcClassIndexMap_; }
   constexpr IncrFixupsMap &incrFixupsMap() { return incrFixupsMap_; }
+  constexpr IncrReferencedMap &incrReferencedMap() {
+    return incrReferencedMap_;
+  }
   constexpr IncrPatchSpaceMap &patchSpaceMap() { return incrPatchSpaceMap_; }
   constexpr std::vector<const ld::Atom *> &stubAtoms() { return stubAtoms_; }
   constexpr std::vector<const ld::Atom *> &objcClassRefsAtoms() {
@@ -239,9 +243,8 @@ class Parser {
     return symbolTypeToOffset_;
   }
 
-  constexpr std::unordered_map<std::string, uint32_t> &stringPool() {
-    return stringPool_;
-  }
+  constexpr StringToOffset &stringPool() { return stringPool_; }
+  constexpr StringToOffset &incrStringPool() { return incrStringPool_; }
 
   constexpr uint32_t currentBufferUsed() const { return currentBufferUsed_; }
 
@@ -348,7 +351,7 @@ class Parser {
   const GlobalSymbolTableEntry<P> *fIncrementalSymbolSection_;
   const char *stringTable_;
   const char *stringTableEnd_;
-  std::unordered_map<std::string, uint32_t> stringPool_;
+  StringToOffset stringPool_;
   uint32_t currentBufferUsed_;
   const uint32_t *indirectSymbolTable_;
   uint32_t indirectTableCount_;
@@ -356,8 +359,9 @@ class Parser {
   bool fSlidableImage_;
   std::vector<InputEntrySection<P> *> incrInputs_;
   std::unordered_map<std::string, InputEntrySection<P> *> incrInputsMap_;
-  std::vector<GlobalSymbolTableEntry<P> *> incrSymbols_;
-  std::vector<std::string> incrStringPool_;
+  /// Symbol index to referenced atom set
+  IncrReferencedMap incrReferencedMap_;
+  StringToOffset incrStringPool_;
   IncrPatchSpaceMap incrPatchSpaceMap_;
   std::vector<const ld::Atom *> stubAtoms_;
   std::vector<const ld::Atom *> refsAtoms_;
@@ -368,7 +372,7 @@ class Parser {
   std::vector<uint64_t> objcClassAddresses_;
   std::unordered_map<uint64_t, uint32_t> objcClassSectionOffsetMap_;
   /// ObjC class index map
-  std::unordered_map<std::string, uint32_t> objcClassIndexMap_;
+  StringToOffset objcClassIndexMap_;
 
   /// ObjC class refs
   std::vector<const ld::Atom *> objcClassRefsAtoms_;
@@ -1020,7 +1024,8 @@ void Parser<A>::parseIncrementalInputsSection(
         break;
     }
     incrInputs_.push_back(incrInputPtr);
-    const char *symName = &fIncrementalStrings_[incrInputPtr->fileIndexInStringTable()];
+    const char *symName =
+        &fIncrementalStrings_[incrInputPtr->fileIndexInStringTable()];
     incrInputsMap_[symName] = incrInputPtr;
     incrInputPtr = (InputEntrySection<P> *)(((uint8_t *)incrInputPtr) + size);
   }
@@ -1082,18 +1087,19 @@ void Parser<A>::parseIncrementalGlobalSymbols(
                                           incrementalCommand->symtab_off());
   GlobalSymbolTableEntry<P> *symbolStart =
       const_cast<GlobalSymbolTableEntry<P> *>(fIncrementalSymbolSection_);
-  const GlobalSymbolTableEntry<P> *symbolEnd = reinterpret_cast<const GlobalSymbolTableEntry<P> *>((uint8_t *)fHeader_ +
-                                          incrementalCommand->symtab_off() +
-                                          incrementalCommand->symtab_size());
+  const GlobalSymbolTableEntry<P> *symbolEnd =
+      reinterpret_cast<const GlobalSymbolTableEntry<P> *>(
+          (uint8_t *)fHeader_ + incrementalCommand->symtab_off() +
+          incrementalCommand->symtab_size());
   while (symbolStart < symbolEnd) {
     if ((symbolEnd - symbolStart) < 8) {
       break;
     }
-    incrSymbols_.push_back(symbolStart);
+    incrReferencedMap_[symbolStart->symbolIndexInStringTable_()] =
+        symbolStart->referencedAtomSet();
     symbolStart =
         (GlobalSymbolTableEntry<P> *)(((uint8_t *)symbolStart) +
-                                      (2 +
-                                       symbolStart->referencedAtomCount()) *
+                                      (2 + symbolStart->referencedAtomCount()) *
                                           sizeof(uint32_t));
   }
 }
@@ -1117,7 +1123,7 @@ void Parser<A>::parseIncrementalStringPool(
     if (!symName || length == 0) {
       break;
     }
-    incrStringPool_.push_back(symName);
+    incrStringPool_[symName] = uintptr_t(p) - uintptr_t(fIncrementalStrings_);
     p += length + 1;
     stringIdx += length + 1;
   }
