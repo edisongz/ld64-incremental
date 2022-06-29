@@ -19,4 +19,7 @@ clean:
 ld64-609-patch:
 	patch -p1 -d ld64-609 < patches/ld64.patch
 
-fetch: cfe-8.0.1.src dyld-733.6 llvm-8.0.1.src tapi-1100.0.11 ld64-609-patch
+tbb:
+	curl -# -L https://github.com/oneapi-src/oneTBB/archive/refs/tags/v2021.5.0.tar.gz | tar xz
+
+fetch: cfe-8.0.1.src dyld-733.6 llvm-8.0.1.src tapi-1100.0.11 ld64-609-patch tbb

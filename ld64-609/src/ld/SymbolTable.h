@@ -43,6 +43,7 @@
 
 #include <vector>
 #include <unordered_map>
+#include "tbb/concurrent_hash_map.h"
 
 #include "Options.h"
 #include "ld.hpp"
