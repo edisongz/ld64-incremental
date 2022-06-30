@@ -65,36 +65,44 @@ SymbolTable::SymbolTable(const Options& opts, std::vector<const ld::Atom*>& ibt)
 	_s_indirectBindingTable = this;
 }
 
+size_t SymbolTable::SymbolFuncs::hash(const char *name) const {
+	return ld::CStringHash()(name);
+}
 
-size_t SymbolTable::ContentFuncs::operator()(const ld::Atom* atom) const
+bool SymbolTable::SymbolFuncs::equal(const char *left, const char *right) const {
+	return ld::CStringEquals()(left, right);
+}
+
+
+size_t SymbolTable::ContentFuncs::hash(const ld::Atom* atom) const
 {
 	return atom->contentHash(*_s_indirectBindingTable);
 }
 
-bool SymbolTable::ContentFuncs::operator()(const ld::Atom* left, const ld::Atom* right) const
+bool SymbolTable::ContentFuncs::equal(const ld::Atom* left, const ld::Atom* right) const
 {
 	return (memcmp(left->rawContentPointer(), right->rawContentPointer(), left->size()) == 0);
 }
 
 
 
-size_t SymbolTable::CStringHashFuncs::operator()(const ld::Atom* atom) const
+size_t SymbolTable::CStringHashFuncs::hash(const ld::Atom* atom) const
 {
 	return atom->contentHash(*_s_indirectBindingTable);
 }
 
-bool SymbolTable::CStringHashFuncs::operator()(const ld::Atom* left, const ld::Atom* right) const
+bool SymbolTable::CStringHashFuncs::equal(const ld::Atom* left, const ld::Atom* right) const
 {
 	return (strcmp((char*)left->rawContentPointer(), (char*)right->rawContentPointer()) == 0);
 }
 
 
-size_t SymbolTable::UTF16StringHashFuncs::operator()(const ld::Atom* atom) const
+size_t SymbolTable::UTF16StringHashFuncs::hash(const ld::Atom* atom) const
 {
 	return atom->contentHash(*_s_indirectBindingTable);
 }
 
-bool SymbolTable::UTF16StringHashFuncs::operator()(const ld::Atom* left, const ld::Atom* right) const
+bool SymbolTable::UTF16StringHashFuncs::equal(const ld::Atom* left, const ld::Atom* right) const
 {
 	if ( left == right )
 		return true;
@@ -106,12 +114,12 @@ bool SymbolTable::UTF16StringHashFuncs::operator()(const ld::Atom* left, const l
 }
 
 
-size_t SymbolTable::ReferencesHashFuncs::operator()(const ld::Atom* atom) const
+size_t SymbolTable::ReferencesHashFuncs::hash(const ld::Atom* atom) const
 {
 	return atom->contentHash(*_s_indirectBindingTable);
 }
 
-bool SymbolTable::ReferencesHashFuncs::operator()(const ld::Atom* left, const ld::Atom* right) const
+bool SymbolTable::ReferencesHashFuncs::equal(const ld::Atom* left, const ld::Atom* right) const
 {
 	return left->canCoalesceWith(*right, *_s_indirectBindingTable);
 }
@@ -130,13 +138,13 @@ void SymbolTable::addDuplicateSymbolWarning(const char* name, const ld::Atom* at
 void SymbolTable::addDuplicateSymbol(DuplicateSymbols& dups, const char *name, const ld::Atom *atom)
 {
     // Look up or create the file list for name.
-    DuplicateSymbols::iterator symbolsIterator = dups.find(name);
+	DuplicateSymbols::const_accessor symbolsIterator;
     DuplicatedSymbolAtomList *atoms = NULL;
-    if (symbolsIterator != dups.end()) {
+    if (dups.find(symbolsIterator, name)) {
         atoms = symbolsIterator->second;
     }
     else {
-        atoms = new std::vector<const ld::Atom *>;
+        atoms = new tbb::concurrent_vector<const ld::Atom *>;
         dups.insert(std::pair<const char *, DuplicatedSymbolAtomList *>(name, atoms));
     }
 
@@ -611,8 +619,8 @@ void SymbolTable::mustPreserveForBitcode(std::unordered_set<const char*>& syms)
 
 bool SymbolTable::hasName(const char* name)			
 { 
-	NameToSlot::iterator pos = _byNameTable.find(name);
-	if ( pos == _byNameTable.end() ) 
+	NameToSlot::const_accessor pos;
+	if (!_byNameTable.find(pos, name))
 		return false;
 	return (_indirectBindingTable[pos->second] != NULL); 
 }
@@ -620,14 +628,14 @@ bool SymbolTable::hasName(const char* name)
 // find existing or create new slot
 SymbolTable::IndirectBindingSlot SymbolTable::findSlotForName(const char* name)
 {
-	NameToSlot::iterator pos = _byNameTable.find(name);
-	if ( pos != _byNameTable.end() ) 
+	NameToSlot::const_accessor pos;
+	if (_byNameTable.find(pos, name))
 		return pos->second;
 	// create new slot for this name
 	SymbolTable::IndirectBindingSlot slot = _indirectBindingTable.size();
 	_indirectBindingTable.push_back(NULL);
-	_byNameTable[name] = slot;
-	_byNameReverseTable[slot] = name;
+	_byNameTable.insert({name, slot});
+	_byNameReverseTable.insert({slot, name});
 	return slot;
 }
 
@@ -730,77 +738,71 @@ SymbolTable::IndirectBindingSlot SymbolTable::findSlotForContent(const ld::Atom*
 {
 	//fprintf(stderr, "findSlotForContent(%p)\n", atom);
 	SymbolTable::IndirectBindingSlot slot = 0;
-	UTF16StringToSlot::iterator upos;
-	CStringToSlot::iterator cspos;
-	ContentToSlot::iterator pos;
+	UTF16StringToSlot::const_accessor upos;
+	CStringToSlot::const_accessor cspos;
+	ContentToSlot::const_accessor pos;
 	switch ( atom->section().type() ) {
 		case ld::Section::typeCString:
-			cspos = _cstringTable.find(atom);
-			if ( cspos != _cstringTable.end() ) {
+			if (_cstringTable.find(cspos, atom)) {
 				*existingAtom = _indirectBindingTable[cspos->second];
 				return cspos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_cstringTable[atom] = slot;
+			_cstringTable.insert({atom, slot});
 			break;
 		case ld::Section::typeNonStdCString:
 			{
 				// use seg/sect name is key to map to avoid coalescing across segments and sections
 				char segsect[64];
 				sprintf(segsect, "%s/%s", atom->section().segmentName(), atom->section().sectionName());
-				NameToMap::iterator mpos = _nonStdCStringSectionToMap.find(segsect);
+				NameToMap::const_accessor mpos;
 				CStringToSlot* map = NULL;
-				if ( mpos == _nonStdCStringSectionToMap.end() ) {
+				if ( !_nonStdCStringSectionToMap.find(mpos, segsect) ) {
 					map = new CStringToSlot();
-					_nonStdCStringSectionToMap[strdup(segsect)] = map;
+					_nonStdCStringSectionToMap.insert({strdup(segsect), map});
 				}
 				else {
 					map = mpos->second;
 				}
-				cspos = map->find(atom);
-				if ( cspos != map->end() ) {
+				if (map->find(cspos, atom)) {
 					*existingAtom = _indirectBindingTable[cspos->second];
 					return cspos->second;
 				}
 				slot = _indirectBindingTable.size();
-				map->operator[](atom) = slot;
+				map->insert({atom, slot});
 			}
 			break;
 		case ld::Section::typeUTF16Strings:
-			upos = _utf16Table.find(atom);
-			if ( upos != _utf16Table.end() ) {
+			if (_utf16Table.find(upos, atom)) {
 				*existingAtom = _indirectBindingTable[upos->second];
 				return upos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_utf16Table[atom] = slot;
+			_utf16Table.insert({atom, slot});
 			break;
 		case ld::Section::typeLiteral4:
-			pos = _literal4Table.find(atom);
-			if ( pos != _literal4Table.end() ) {
+			if ( _literal4Table.find(pos, atom) ) {
 				*existingAtom = _indirectBindingTable[pos->second];
 				return pos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_literal4Table[atom] = slot;
+			_literal4Table.insert({atom, slot});
 			break;
 		case ld::Section::typeLiteral8:
-			pos = _literal8Table.find(atom);
-			if ( pos != _literal8Table.end() ) {
+			if ( _literal8Table.find(pos, atom) ) {
 				*existingAtom = _indirectBindingTable[pos->second];
 				return pos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_literal8Table[atom] = slot;
+			_literal8Table.insert({atom, slot});
 			break;
 		case ld::Section::typeLiteral16:
-			pos = _literal16Table.find(atom);
-			if ( pos != _literal16Table.end() ) {
+			if ( _literal16Table.find(pos, atom) ) {
 				*existingAtom = _indirectBindingTable[pos->second];
 				return pos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_literal16Table[atom] = slot;
+			_literal16Table.insert({atom, slot});
 			break;
 		default:
 			assert(0 && "section type does not support coalescing by content");
@@ -818,52 +820,47 @@ SymbolTable::IndirectBindingSlot SymbolTable::findSlotForReferences(const ld::At
 	//fprintf(stderr, "findSlotForReferences(%p)\n", atom);
 	
 	SymbolTable::IndirectBindingSlot slot = 0;
-	ReferencesToSlot::iterator pos;
+	ReferencesToSlot::const_accessor pos;
 	switch ( atom->section().type() ) {
-		case ld::Section::typeNonLazyPointer:		
-			pos = _nonLazyPointerTable.find(atom);
-			if ( pos != _nonLazyPointerTable.end() ) {
+		case ld::Section::typeNonLazyPointer:
+			if (_nonLazyPointerTable.find(pos, atom)) {
 				*existingAtom = _indirectBindingTable[pos->second];
 				return pos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_nonLazyPointerTable[atom] = slot;
+			_nonLazyPointerTable.insert({atom, slot});
 			break;
 		case ld::Section::typeCFString:
-			pos = _cfStringTable.find(atom);
-			if ( pos != _cfStringTable.end() ) {
+			if (_cfStringTable.find(pos, atom)) {
 				*existingAtom = _indirectBindingTable[pos->second];
 				return pos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_cfStringTable[atom] = slot;
+			_cfStringTable.insert({atom, slot});
 			break;
 		case ld::Section::typeObjCClassRefs:
-			pos = _objc2ClassRefTable.find(atom);
-			if ( pos != _objc2ClassRefTable.end() ) {
+			if (_objc2ClassRefTable.find(pos, atom)) {
 				*existingAtom = _indirectBindingTable[pos->second];
 				return pos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_objc2ClassRefTable[atom] = slot;
+			_objc2ClassRefTable.insert({atom, slot});
 			break;
 		case ld::Section::typeCStringPointer:
-			pos = _pointerToCStringTable.find(atom);
-			if ( pos != _pointerToCStringTable.end() ) {
+			if (_pointerToCStringTable.find(pos, atom)) {
 				*existingAtom = _indirectBindingTable[pos->second];
 				return pos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_pointerToCStringTable[atom] = slot;
+			_pointerToCStringTable.insert({atom, slot});
 			break;
 		case ld::Section::typeTLVPointers:
-			pos = _threadPointerTable.find(atom);
-			if ( pos != _threadPointerTable.end() ) {
+			if (_threadPointerTable.find(pos, atom)) {
 				*existingAtom = _indirectBindingTable[pos->second];
 				return pos->second;
 			}
 			slot = _indirectBindingTable.size();
-			_threadPointerTable[atom] = slot;
+			_threadPointerTable.insert({atom, slot});
 			break;
 		default:
 			assert(0 && "section type does not support coalescing by references");
@@ -882,8 +879,8 @@ const char*	SymbolTable::indirectName(IndirectBindingSlot slot) const
 		return target->name();
 	}
 	// handle case when by-name reference is indirected and no atom yet in _byNameTable
-	SlotToName::const_iterator pos = _byNameReverseTable.find(slot);
-	if ( pos != _byNameReverseTable.end() )
+	SlotToName::const_accessor pos;
+	if (_byNameReverseTable.find(pos, slot))
 		return pos->second;
 	assert(0);
 	return NULL;
@@ -926,9 +923,12 @@ void SymbolTable::removeDeadUndefs(std::vector<const ld::Atom*>& allAtoms, const
 				allAtoms.erase(std::remove(allAtoms.begin(), allAtoms.end(), atom), allAtoms.end());
 			}
 			else if ( atom == nullptr ) {
-				if ( const char* undefName = _byNameReverseTable[slot] ) {
+				SlotToName::const_accessor pos;
+				
+				if ( _byNameReverseTable.find(pos, slot) ) {
 					// <rdar://problem/55544746> Remove unused undef symbols from symbol table after LTO before doing final resolve
 					_byNameReverseTable.erase(slot);
+					auto undefName = pos->second;
 					_byNameTable.erase(undefName);
 				}
 			}
@@ -945,13 +945,13 @@ void SymbolTable::printStatistics()
 	for(unsigned int b=0; b < 11; ++b) {
 		count[b] = 0;
 	}
-	for(unsigned int i=0; i < _cstringTable.bucket_count(); ++i) {
-		unsigned int n = _cstringTable.bucket_size(i);
-		if ( n < 10 ) 
-			count[n] += 1;
-		else
-			count[10] += 1;
-	}
+//	for(unsigned int i=0; i < _cstringTable.bucket_count(); ++i) {
+//		unsigned int n = _cstringTable.bucket_size(i);
+//		if ( n < 10 ) 
+//			count[n] += 1;
+//		else
+//			count[10] += 1;
+//	}
 	fprintf(stderr, "cstring table distribution\n");
 	for(unsigned int b=0; b < 11; ++b) {
 		fprintf(stderr, "%u buckets have %u elements\n", count[b], b);

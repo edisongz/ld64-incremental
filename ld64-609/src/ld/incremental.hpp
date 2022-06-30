@@ -43,7 +43,7 @@ class Incremental {
       const std::function<void(BindingInfoTuple &)> &handler);
   void forEachLazyBindingInfo(
       const std::function<void(BindingInfoTuple &)> &handler);
-  constexpr std::vector<IncrFixup> &findRelocations(const char *atomName) {
+  constexpr std::vector<incremental_fixup> &findRelocations(const char *atomName) {
     return incrFixupsMap_[atomName];
   }
 

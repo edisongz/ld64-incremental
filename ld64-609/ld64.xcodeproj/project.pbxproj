@@ -48,6 +48,7 @@
 		B3B672421406D42800A376BB /* Snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B3B672411406D42800A376BB /* Snapshot.cpp */; };
 		B4374D2927BA4BC10062D67D /* incremental.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B4374D2727BA4BC10062D67D /* incremental.cpp */; };
 		B46FACE8284E0E3B00C574E2 /* macho_incremental_file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B46FACE6284E0E3B00C574E2 /* macho_incremental_file.cpp */; };
+		B4B2F040286D4543007E8B5D /* libtbb.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B4B2F03F286D4543007E8B5D /* libtbb.a */; };
 		C1E27B581F6B1B68003B8FA6 /* thread_starts.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C1E27B571F6B1B67003B8FA6 /* thread_starts.cpp */; };
 		C1ED154823C934E800748423 /* objc_constants.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C1ED154623C934E800748423 /* objc_constants.cpp */; };
 		DE3EC65E240ECBE4008CD445 /* ResponseFiles.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DE3EC65C240ECBE4008CD445 /* ResponseFiles.cpp */; };
@@ -261,6 +262,7 @@
 		B4374D2827BA4BC10062D67D /* incremental.hpp */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = sourcecode.cpp.h; name = incremental.hpp; path = src/ld/incremental.hpp; sourceTree = "<group>"; tabWidth = 2; };
 		B46FACE6284E0E3B00C574E2 /* macho_incremental_file.cpp */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = sourcecode.cpp.cpp; path = macho_incremental_file.cpp; sourceTree = "<group>"; tabWidth = 2; };
 		B46FACE7284E0E3B00C574E2 /* macho_incremental_file.hpp */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = sourcecode.cpp.h; path = macho_incremental_file.hpp; sourceTree = "<group>"; tabWidth = 2; };
+		B4B2F03F286D4543007E8B5D /* libtbb.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libtbb.a; sourceTree = "<group>"; };
 		C1E27B571F6B1B67003B8FA6 /* thread_starts.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = thread_starts.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		C1E27B591F6B1B70003B8FA6 /* thread_starts.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = thread_starts.h; sourceTree = "<group>"; };
 		C1ED154623C934E800748423 /* objc_constants.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = objc_constants.cpp; sourceTree = "<group>"; };
@@ -381,6 +383,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B4B2F040286D4543007E8B5D /* libtbb.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -415,6 +418,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		B4B2F03E286D4543007E8B5D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				B4B2F03F286D4543007E8B5D /* libtbb.a */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		F9023C2C06D5A227001BBF46 = {
 			isa = PBXGroup;
 			children = (
@@ -423,6 +434,7 @@
 				F9B813B00EC27B9E00F94C13 /* other */,
 				F9B8137E0EC2651200F94C13 /* doc */,
 				F9023C3A06D5A23E001BBF46 /* Products */,
+				B4B2F03E286D4543007E8B5D /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -1253,9 +1265,14 @@
 					"\"$(SRCROOT)/../llvm-8.0.1.src/include\"",
 					"\"$(SRCROOT)/../tapi-1100.0.11/include\"",
 					"\"$(SRCROOT)/../corecrypto/include\"",
+					"\"$(SRCROOT)/../oneTBB-2021.5.0/include\"",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)",
+				);
 				LINKER_DISPLAYS_MANGLED_NAMES = NO;
 				ONLY_ACTIVE_ARCH = NO;
 				OTHER_CPLUSPLUSFLAGS = (
@@ -1337,9 +1354,14 @@
 					"\"$(SRCROOT)/../llvm-8.0.1.src/include\"",
 					"\"$(SRCROOT)/../tapi-1100.0.11/include\"",
 					"\"$(SRCROOT)/../corecrypto/include\"",
+					"\"$(SRCROOT)/../oneTBB-2021.5.0/include\"",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)",
+				);
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CPLUSPLUSFLAGS)",
@@ -1656,9 +1678,14 @@
 					"\"$(SRCROOT)/../llvm-8.0.1.src/include\"",
 					"\"$(SRCROOT)/../tapi-1100.0.11/include\"",
 					"\"$(SRCROOT)/../corecrypto/include\"",
+					"\"$(SRCROOT)/../oneTBB-2021.5.0/include\"",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)",
+				);
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CPLUSPLUSFLAGS)",

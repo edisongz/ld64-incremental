@@ -26,7 +26,7 @@
 namespace ld {
 namespace incremental {
 
-using IncrFixupsMap = std::unordered_map<std::string, std::vector<IncrFixup>>;
+using IncrFixupsMap = std::unordered_map<std::string, std::vector<incremental_fixup>>;
 using IncrReferencedMap = std::unordered_map<uint32_t, std::set<uint32_t>>;
 using SymbolSectionOffset =
     std::unordered_map<uint8_t, std::unordered_map<std::string, uint64_t>>;
@@ -1040,7 +1040,7 @@ void Parser<A>::parseIncrementalFixupSection(
   incrementalFixupSection_->forEachFixup([&](const IncrFixupEntry<P> &fixup) {
     const char *key = &fIncrementalStrings_[fixup.nameIndex()];
     if (incrFixupsMap_.find(key) == incrFixupsMap_.end()) {
-      std::vector<IncrFixup> fixups;
+      std::vector<incremental_fixup> fixups;
       fixups.push_back({fixup.address(), fixup.nameIndex()});
       incrFixupsMap_[key] = fixups;
     } else {

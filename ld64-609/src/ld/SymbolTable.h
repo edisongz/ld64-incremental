@@ -46,6 +46,9 @@
 
 #include "Options.h"
 #include "ld.hpp"
+#include "tbb/concurrent_hash_map.h"
+#include "tbb/concurrent_vector.h"
+#include "tbb/parallel_for.h"
 
 namespace ld {
 namespace tool {
@@ -57,41 +60,46 @@ public:
 	typedef uint32_t IndirectBindingSlot;
 
 private:
-	typedef std::unordered_map<const char*, IndirectBindingSlot, CStringHash, CStringEquals> NameToSlot;
+	class SymbolFuncs {
+	public:
+		size_t hash(const char *) const;
+		bool equal(const char *left, const char *right) const;
+	};
+	typedef tbb::concurrent_hash_map<const char *, IndirectBindingSlot, SymbolFuncs> NameToSlot;
 
 	class ContentFuncs {
 	public:
-		size_t	operator()(const ld::Atom*) const;
-		bool	operator()(const ld::Atom* left, const ld::Atom* right) const;
+		size_t	hash(const ld::Atom*) const;
+		bool	equal(const ld::Atom* left, const ld::Atom* right) const;
 	};
-	typedef std::unordered_map<const ld::Atom*, IndirectBindingSlot, ContentFuncs, ContentFuncs> ContentToSlot;
+	typedef tbb::concurrent_hash_map<const ld::Atom*, IndirectBindingSlot, ContentFuncs> ContentToSlot;
 
 	class ReferencesHashFuncs {
 	public:
-		size_t	operator()(const ld::Atom*) const;
-		bool	operator()(const ld::Atom* left, const ld::Atom* right) const;
+		size_t	hash(const ld::Atom*) const;
+		bool	equal(const ld::Atom* left, const ld::Atom* right) const;
 	};
-	typedef std::unordered_map<const ld::Atom*, IndirectBindingSlot, ReferencesHashFuncs, ReferencesHashFuncs> ReferencesToSlot;
+	typedef tbb::concurrent_hash_map<const ld::Atom*, IndirectBindingSlot, ReferencesHashFuncs> ReferencesToSlot;
 
 	class CStringHashFuncs {
 	public:
-		size_t	operator()(const ld::Atom*) const;
-		bool	operator()(const ld::Atom* left, const ld::Atom* right) const;
+		size_t	hash(const ld::Atom*) const;
+		bool	equal(const ld::Atom* left, const ld::Atom* right) const;
 	};
-	typedef std::unordered_map<const ld::Atom*, IndirectBindingSlot, CStringHashFuncs, CStringHashFuncs> CStringToSlot;
+	typedef tbb::concurrent_hash_map<const ld::Atom*, IndirectBindingSlot, CStringHashFuncs> CStringToSlot;
 
 	class UTF16StringHashFuncs {
 	public:
-		size_t	operator()(const ld::Atom*) const;
-		bool	operator()(const ld::Atom* left, const ld::Atom* right) const;
+		size_t	hash(const ld::Atom*) const;
+		bool	equal(const ld::Atom* left, const ld::Atom* right) const;
 	};
-	typedef std::unordered_map<const ld::Atom*, IndirectBindingSlot, UTF16StringHashFuncs, UTF16StringHashFuncs> UTF16StringToSlot;
+	typedef tbb::concurrent_hash_map<const ld::Atom*, IndirectBindingSlot, UTF16StringHashFuncs> UTF16StringToSlot;
 
-	typedef std::map<IndirectBindingSlot, const char*> SlotToName;
-	typedef std::unordered_map<const char*, CStringToSlot*, CStringHash, CStringEquals> NameToMap;
+	typedef tbb::concurrent_hash_map<IndirectBindingSlot, const char*> SlotToName;
+	typedef tbb::concurrent_hash_map<const char*, CStringToSlot *, SymbolFuncs> NameToMap;
     
-    typedef std::vector<const ld::Atom *> DuplicatedSymbolAtomList;
-    typedef std::map<const char *, DuplicatedSymbolAtomList * > DuplicateSymbols;
+    typedef tbb::concurrent_vector<const ld::Atom *> DuplicatedSymbolAtomList;
+    typedef tbb::concurrent_hash_map<const char *, DuplicatedSymbolAtomList * > DuplicateSymbols;
 	
 public:
 
