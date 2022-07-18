@@ -2404,7 +2404,7 @@ void IncrementalInputsAtom<A>::encode() const {
 				entry->setModTime(it->modTime);
 				entry->setType(file->type());
 				entry->setAtomCount(atomCount);
-				ld::incremental::incremental_atom_entry *atomPtr = entry->entryRef().u.relocObj->atoms;
+				ld::incremental::incremental_atom_entry *atomPtr = entry->entryRef().u.atoms->atoms;
 				for (auto ait = atoms.begin(); ait != atoms.end(); ait++) {
 					const ld::Atom *atom = *ait;
 					const ld::Internal::FinalSection& sect = static_cast<const ld::Internal::FinalSection&>((*ait)->section());
@@ -2518,8 +2518,9 @@ void IncrementalFixupsAtom<A>::encode() const {
 				const ld::Atom *toTarget = targetAtomOfFixup(fit);
 				if (toTarget && toTarget->scope() != ld::Atom::scopeTranslationUnit && toTarget->file() && atom->file() != toTarget->file()) {
 					ld::incremental::IncrFixupEntry<P> entry;
-					entry.setAddress(fileOffset + fit->offsetInAtom);
 					entry.setNameIndex(stringTable_[toTarget->name()]);
+					entry.setAddress(fileOffset + fit->offsetInAtom);
+					
 					fixups.push_back(entry);
 				}
 			}

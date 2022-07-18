@@ -30,25 +30,26 @@ struct incremental_input_entry {
   uint64_t modTime_;                 // last link input file modification time
   uint32_t type_;                    // input file type
 
-  struct RelocObj {
+  struct atoms {
     uint32_t atomCount_;
     incremental_atom_entry atoms[0];
   };
 
   union {
-    RelocObj relocObj[0];
+    atoms atoms[0];
   } u;
 };
 
-struct IncrFixup {
-  uint64_t address_;
-  uint32_t nameIndex_;
+struct incremental_fixup {
+  uint32_t symbol_index;
+  uint32_t r_address;
+  uint32_t r_other;
 };
 
 /// Input file relocations
 struct InputFileFixup {
   uint32_t fixupCount_;  // fixupCount
-  IncrFixup fixups_[0];
+  incremental_fixup fixups_[0];
 };
 
 /// Symbol referenced entry
@@ -135,16 +136,16 @@ class InputEntrySection {
   void setType(uint32_t value) INLINE { E::set32(entry.type_, value); }
 
   uint32_t atomCount() const INLINE {
-    return E::get32(entry.u.relocObj->atomCount_);
+    return E::get32(entry.u.atoms->atomCount_);
   }
   void setAtomCount(uint32_t value) INLINE {
-    E::set32(entry.u.relocObj->atomCount_, value);
+    E::set32(entry.u.atoms->atomCount_, value);
   }
 
   std::vector<AtomEntry<P>> atoms() const {
     std::vector<AtomEntry<P>> v;
     incremental_atom_entry *p =
-        (incremental_atom_entry *)entry.u.relocObj->atoms;
+        (incremental_atom_entry *)entry.u.atoms->atoms;
     for (uint32_t i = 0; i < atomCount(); i++) {
       AtomEntry<P> atom;
       atom.setAtomNameIndex_(p->name_index);
@@ -167,18 +168,21 @@ class InputEntrySection {
 template <typename P>
 class IncrFixupEntry {
  public:
-  uint64_t address() const INLINE { return E::get64(entry.address_); }
-  void setAddress(uint64_t value) INLINE { E::set64(entry.address_, value); }
+  uint32_t address() const INLINE { return E::get32(entry.r_address); }
+  void setAddress(uint32_t value) INLINE { E::set32(entry.r_address, value); }
 
-  uint32_t nameIndex() const INLINE { return E::get32(entry.nameIndex_); }
+  uint32_t other() const INLINE { return E::get32(entry.r_other); }
+  void setOther(uint32_t value) INLINE { E::set32(entry.r_other, value); }
+  
+  uint32_t nameIndex() const INLINE { return E::get32(entry.symbol_index); }
   void setNameIndex(uint32_t value) INLINE {
-    E::set32(entry.nameIndex_, value);
+    E::set32(entry.symbol_index, value);
   }
 
   typedef typename P::E E;
 
  private:
-  IncrFixup entry;
+  incremental_fixup entry;
 };
 
 template <typename P>
