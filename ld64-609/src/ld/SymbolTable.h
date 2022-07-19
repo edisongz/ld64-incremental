@@ -112,14 +112,14 @@ public:
 
 	private:
 		friend class SymbolTable;
-								byNameIterator(NameToSlot::iterator it, std::vector<const ld::Atom*>& indirectTable)
+								byNameIterator(NameToSlot::iterator it, tbb::concurrent_vector<const ld::Atom *> &indirectTable)
 									: _nameTableIterator(it), _slotTable(indirectTable) {} 
 		
 		NameToSlot::iterator			_nameTableIterator;
-		std::vector<const ld::Atom*>&	_slotTable;
+		tbb::concurrent_vector<const ld::Atom *> &_slotTable;
 	};
 	
-						SymbolTable(const Options& opts, std::vector<const ld::Atom*>& ibt);
+						SymbolTable(const Options& opts, tbb::concurrent_vector<const ld::Atom *> &ibt);
 
 	bool				add(const ld::Atom& atom, Options::Treatment duplicates);
 	IndirectBindingSlot	findSlotForName(const char* name);
@@ -172,7 +172,7 @@ private:
 	ReferencesToSlot				_cfStringTable;
 	ReferencesToSlot				_objc2ClassRefTable;
 	ReferencesToSlot				_pointerToCStringTable;
-	std::vector<const ld::Atom*>&	_indirectBindingTable;
+	tbb::concurrent_vector<const ld::Atom *> &_indirectBindingTable;
 	bool							_hasExternalTentativeDefinitions;
 	
     DuplicateSymbols                _duplicateSymbolErrors;

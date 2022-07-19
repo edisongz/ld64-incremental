@@ -47,6 +47,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 #include <list>
 #include <algorithm>
@@ -1016,7 +1017,7 @@ void InputFiles::startThread(void (*threadFunc)(InputFiles *)) const {
 }
 
 // Work loop for input file parsing threads
-void InputFiles::parseWorkerThread() {
+void InputFiles::parseWorkerThread(ld::File::AtomHandler *handler, ld::Internal *state) {
 	ld::File *file;
 	const char *exception = NULL;
 	pthread_mutex_lock(&_parseLock);
@@ -1069,8 +1070,57 @@ void InputFiles::parseWorkerThread() {
 			} 
 			else {
 				_inputFiles[slot] = file;
-				if (_neededFileSlot == slot)
+				if (_neededFileSlot == slot) {
+					const auto &info = files[slot];
+					switch (file->type()) {
+						case ld::File::Reloc:
+						{
+							ld::relocatable::File* reloc = (ld::relocatable::File*)file;
+							_options.snapshot().recordObjectFile(reloc->path());
+							_options.addDependency(Options::depObjectFile, reloc->path());
+						}
+							break;
+						case ld::File::Dylib:
+						{
+							ld::dylib::File* dylib = (ld::dylib::File*)file;
+							addDylib(dylib, info);
+						}
+							break;
+						case ld::File::Archive:
+						{
+							ld::archive::File* archive = (ld::archive::File*)file;
+							// <rdar://problem/9740166> force loaded archives should be in LD_TRACE
+							if ( (info.options.fForceLoad || _options.fullyLoadArchives()) && (_options.traceArchives() || _options.traceEmitJSON()) )
+								logArchive(archive);
+
+							if ( isCompilerSupportLib(info.path) && (info.options.fForceLoad || _options.fullyLoadArchives()) ) {
+								if (state != nullptr) {
+									state->forceLoadCompilerRT = true;
+								}
+							}
+
+							_searchLibraries.push_back(LibraryInfo(archive));
+							_options.addDependency(Options::depArchive, archive->path());
+						}
+							break;
+						case ld::File::Other:
+							break;
+						default:
+						{
+							throwf("Unknown file type for %s", file->path());
+						}
+							break;
+					}
+					try {
+						if (handler != nullptr) {
+							file->forEachAtom(*handler);
+						}
+					}
+					catch (const char* msg) {
+						asprintf((char**)&_exception, "%s file '%s'", msg, file->path());
+					}
 					pthread_cond_signal(&_newFileAvailable);
+				}
 			}
 		}
 	} while (_remainingInputFiles);
@@ -1082,7 +1132,7 @@ void InputFiles::parseWorkerThread() {
 
 
 void InputFiles::parseWorkerThread(InputFiles *inputFiles) {
-	inputFiles->parseWorkerThread();
+	inputFiles->parseWorkerThread(nullptr, nullptr);
 }
 #endif
 
@@ -1228,7 +1278,10 @@ void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler, ld::Internal
 			// not maxed out the worker thread count start a new worker thread.
 			if (_availableInputFiles > 0 && _availableWorkers > 0) {
 				if (_s_logPThreads) printf("starting worker\n");
-				startThread(InputFiles::parseWorkerThread);
+				std::thread parseThread([&]() {
+					parseWorkerThread(&handler, &state);
+				});
+				parseThread.detach();
 				_availableWorkers--;
 			}
 			_neededFileSlot = fileIndex;
@@ -1248,7 +1301,6 @@ void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler, ld::Internal
 		pthread_mutex_unlock(&_parseLock);
 #else
 		file = _inputFiles[fileIndex];
-#endif
 		const Options::FileInfo& info = files[fileIndex];
 		switch (file->type()) {
 			case ld::File::Reloc:
@@ -1292,6 +1344,7 @@ void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler, ld::Internal
 		catch (const char* msg) {
 			asprintf((char**)&_exception, "%s file '%s'", msg, file->path());
 		}
+#endif
 	}
 	if (_exception) {
 		// <rdar://problem/16525216> the tool is erroring out.  wait for other threads to finish so we don't destruct global objects out from under them

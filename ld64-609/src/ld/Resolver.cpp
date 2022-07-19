@@ -39,6 +39,7 @@
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <mach-o/fat.h>
+#include <pthread.h>
 
 #include <string>
 #include <map>
@@ -66,6 +67,13 @@
 namespace ld {
 namespace tool {
 
+class Mutex {
+	static pthread_mutex_t lock_;
+public:
+	Mutex() { pthread_mutex_lock(&lock_); }
+	~Mutex() { pthread_mutex_unlock(&lock_); }
+};
+pthread_mutex_t Mutex::lock_ = PTHREAD_MUTEX_INITIALIZER;
 
 //
 // An ExportAtom has no content.  It exists so that the linker can track which imported
@@ -687,7 +695,10 @@ void Resolver::doAtom(const ld::Atom& atom)
 		warning("'%s' is implemented in bitcode, but it was loaded too late", atom.name());
 
 	// add to list of known atoms
-	_atoms.push_back(&atom);
+	{
+		Mutex lock;
+		_atoms.push_back(&atom);
+	}
 	
 	// adjust scope
 	if ( _options.hasExportRestrictList() || _options.hasReExportList() ) {
@@ -807,6 +818,7 @@ void Resolver::doAtom(const ld::Atom& atom)
 	}
 	
 	if ( _options.deadCodeStrip() ) {
+		Mutex lock;
 		// add to set of dead-strip-roots, all symbols that the compiler marks as don't strip
 		if ( atom.dontDeadStrip() )
 			_deadStripRoots.insert(&atom);
@@ -1155,6 +1167,7 @@ public:
 
 void Resolver::deadStripOptimize(bool force)
 {
+	Mutex lock;
 	if (_options.enableIncrementalLink() && _options.validIncrementalUpdate()) {
 		return;
 	}
@@ -1190,7 +1203,7 @@ void Resolver::deadStripOptimize(bool force)
 		_deadStripRoots.insert(_internal.lazyBindingHelper);
 
 	// add all dont-dead-strip atoms as roots
-	for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+	for (auto it = _atoms.begin(); it != _atoms.end(); ++it) {
 		const ld::Atom* atom = *it;
 		if ( atom->dontDeadStrip() ) {
 			//fprintf(stderr, "dont dead strip: %p %s %s\n", atom, atom->section().sectionName(), atom->name());
@@ -1257,7 +1270,7 @@ void Resolver::deadStripOptimize(bool force)
 	const bool log = false;
 	if ( log ) {
 		fprintf(stderr, "deadStripOptimize() all %ld atoms with liveness:\n", _atoms.size());
-		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+		for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it) {
 			const ld::File* file = (*it)->file();
 			fprintf(stderr, "  live=%d  atom=%p  name=%s from=%s\n", (*it)->live(), *it, (*it)->name(),  (file ? file->path() : "<internal>"));
 		}
@@ -1276,7 +1289,7 @@ void Resolver::deadStripOptimize(bool force)
 
 	if ( log ) {
 		fprintf(stderr, "deadStripOptimize() %ld remaining atoms\n", _atoms.size());
-		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+		for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it) {
 			fprintf(stderr, "  live=%d  atom=%p  name=%s\n", (*it)->live(), *it, (*it)->name());
 		}
 	}
@@ -1289,7 +1302,7 @@ void Resolver::remainingUndefines(std::vector<const char*>& undefs)
 {
 	StringSet  undefSet;
 	// search all atoms for references that are unbound
-	for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+	for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it) {
 		const ld::Atom* atom = *it;
 		for (ld::Fixup::iterator fit=atom->fixupsBegin(); fit != atom->fixupsEnd(); ++fit) {
 			switch ( (ld::Fixup::TargetBinding)fit->binding ) {
@@ -1327,7 +1340,7 @@ void Resolver::liveUndefines(std::vector<const char*>& undefs)
 {
 	StringSet  undefSet;
 	// search all live atoms for references that are unbound
-	for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+	for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it) {
 		const ld::Atom* atom = *it;
 		if ( ! atom->live() )
 			continue;
@@ -1425,7 +1438,7 @@ static const char* pathLeafName(const char* path)
 bool Resolver::printReferencedBy(const char* name, SymbolTable::IndirectBindingSlot slot)
 {
 	unsigned foundReferenceCount = 0;
-	for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+	for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it) {
 		const ld::Atom* atom = *it;
 		for (ld::Fixup::iterator fit=atom->fixupsBegin(); fit != atom->fixupsEnd(); ++fit) {
 			if ( fit->binding == ld::Fixup::bindingsIndirectlyBound ) {
@@ -1699,7 +1712,7 @@ void Resolver::fillInHelpersInInternalState()
 void Resolver::fillInInternalState()
 {
 	// store atoms into their final section
-	for (std::vector<const ld::Atom*>::iterator it = _atoms.begin(); it != _atoms.end(); ++it) {
+	for (auto it = _atoms.begin(); it != _atoms.end(); ++it) {
 		_internal.addAtom(**it);
 	}
 	
@@ -1727,7 +1740,7 @@ void Resolver::syncAliases()
 		return;
 	
 	// Set attributes of alias to match its found target
-	for (std::vector<const ld::Atom*>::iterator it = _atoms.begin(); it != _atoms.end(); ++it) {
+	for (auto it = _atoms.begin(); it != _atoms.end(); ++it) {
 		const ld::Atom* atom = *it;
 		if ( atom->section().type() == ld::Section::typeTempAlias ) {
 			assert(atom->fixupsBegin() != atom->fixupsEnd());
@@ -1763,7 +1776,7 @@ void Resolver::removeCoalescedAwayAtoms()
 	_atoms.erase(std::remove_if(_atoms.begin(), _atoms.end(), AtomCoalescedAway()), _atoms.end());
 	if ( log ) {
 		fprintf(stderr, "removeCoalescedAwayAtoms() after removing coalesced atoms, %lu remain\n", _atoms.size());
-		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+		for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it) {
 			fprintf(stderr, "  atom=%p %s\n", *it, (*it)->name());
 		}
 	}
@@ -1856,7 +1869,7 @@ void Resolver::linkTimeOptimize()
 	this->removeCoalescedAwayAtoms();
 
 	// run through all atoms again and make sure newly codegened atoms have references bound
-	for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) 
+	for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it)
 		this->convertReferencesToIndirect(**it);
 
 	// adjust section of any new
@@ -1883,7 +1896,7 @@ void Resolver::linkTimeOptimize()
 	if ( _options.deadCodeStrip() ) {
 		// run through all atoms again and make live_section LTO atoms are preserved from dead_stripping if needed
 		_dontDeadStripIfReferencesLive.clear();
-		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+		for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it) {
 			const ld::Atom* atom = *it;
 			if ( atom->dontDeadStripIfReferencesLive() ) {
 				_dontDeadStripIfReferencesLive.push_back(atom);
@@ -1898,7 +1911,7 @@ void Resolver::linkTimeOptimize()
 
 	// <rdar://problem/12386559> if -exported_symbols_list on command line, re-force scope
 	if ( _options.hasExportMaskList() ) {
-		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+		for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it) {
 			const ld::Atom* atom = *it;
 			if ( atom->scope() == ld::Atom::scopeGlobal ) {
 				if ( !_options.shouldExport(atom->name()) ) {
@@ -1982,7 +1995,7 @@ void Resolver::buildArchivesList()
 void Resolver::dumpAtoms() 
 {
 	fprintf(stderr, "Resolver all atoms:\n");
-	for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+	for (auto it = _atoms.cbegin(); it != _atoms.cend(); ++it) {
 		const ld::Atom* atom = *it;
 		fprintf(stderr, "  %p name=%s, def=%d\n", atom, atom->name(), atom->definition());
 	}

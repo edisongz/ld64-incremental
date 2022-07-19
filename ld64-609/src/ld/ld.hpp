@@ -39,6 +39,7 @@
 
 #include "configure.h"
 #include "PlatformSupport.h"
+#include "tbb/concurrent_vector.h"
 
 //FIXME: Only needed until we move VersionSet into PlatformSupport
 class Options;
@@ -1336,7 +1337,7 @@ public:
 	CStringSet									linkerOptionFrameworks;
 	CStringSet									missingLinkerOptionLibraries;
 	CStringSet									missingLinkerOptionFrameworks;
-	std::vector<const ld::Atom*>				indirectBindingTable;
+	tbb::concurrent_vector<const ld::Atom*>		indirectBindingTable;
 	std::vector<const ld::relocatable::File*>	filesWithBitcode;
 	std::vector<const ld::relocatable::File*>	filesFromCompilerRT;
 	std::vector<const ld::relocatable::File*>	filesForLTO;

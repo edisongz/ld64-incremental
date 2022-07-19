@@ -104,7 +104,7 @@ private:
 	static void					waitForInputFiles(InputFiles *inputFiles);
 
 	// for threaded input file processing
-	void						parseWorkerThread();
+	void						parseWorkerThread(ld::File::AtomHandler *handler, ld::Internal *state);
 	static void					parseWorkerThread(InputFiles *inputFiles);
 	void						startThread(void (*threadFunc)(InputFiles *)) const;
 

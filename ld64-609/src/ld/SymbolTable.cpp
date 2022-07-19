@@ -59,7 +59,7 @@ namespace tool {
 static ld::IndirectBindingTable*	_s_indirectBindingTable = NULL;
 
 
-SymbolTable::SymbolTable(const Options& opts, std::vector<const ld::Atom*>& ibt) 
+SymbolTable::SymbolTable(const Options& opts, tbb::concurrent_vector<const ld::Atom *> &ibt) 
 	: _options(opts), _cstringTable(6151), _indirectBindingTable(ibt), _hasExternalTentativeDefinitions(false)
 {  
 	_s_indirectBindingTable = this;
@@ -643,7 +643,7 @@ void SymbolTable::removeDeadAtoms()
 {
 	// remove dead atoms from: _byNameTable, _byNameReverseTable, and _indirectBindingTable
 	std::vector<const char*> namesToRemove;
-	for (NameToSlot::iterator it=_byNameTable.begin(); it != _byNameTable.end(); ++it) {
+	for (auto it = _byNameTable.begin(); it != _byNameTable.end(); ++it) {
 		IndirectBindingSlot slot = it->second;
 		const ld::Atom* atom = _indirectBindingTable[slot];
 		if ( atom != NULL ) {
@@ -657,78 +657,99 @@ void SymbolTable::removeDeadAtoms()
 			}
 		}
 	}
-	for (std::vector<const char*>::iterator it = namesToRemove.begin(); it != namesToRemove.end(); ++it) {
+	for (auto it = namesToRemove.cbegin(); it != namesToRemove.cend(); ++it) {
 		_byNameTable.erase(*it);
 	}
 
 	// remove dead atoms from _nonLazyPointerTable
-	for (ReferencesToSlot::iterator it=_nonLazyPointerTable.begin(); it != _nonLazyPointerTable.end(); ) {
+	std::vector<const ld::Atom *> nonLazyPointToRemove;
+	for (auto it = _nonLazyPointerTable.begin(); it != _nonLazyPointerTable.end(); ++it) {
 		const ld::Atom* atom = it->first;
 		assert(atom != NULL);
-		if ( !atom->live() && !atom->dontDeadStrip() )
-			it = _nonLazyPointerTable.erase(it);
-		else
-			++it;
+		if (!atom->live() && !atom->dontDeadStrip()) {
+			nonLazyPointToRemove.push_back(atom);
+		}
+	}
+	for (auto it = nonLazyPointToRemove.cbegin(); it != nonLazyPointToRemove.cend(); ++it) {
+		_nonLazyPointerTable.erase(*it);
 	}
 
 	// remove dead atoms from _cstringTable
-	for (CStringToSlot::iterator it=_cstringTable.begin(); it != _cstringTable.end(); ) {
+	std::vector<const ld::Atom *> cstringToRemove;
+	for (auto it = _cstringTable.begin(); it != _cstringTable.end(); ++it) {
 		const ld::Atom* atom = it->first;
 		assert(atom != NULL);
-		if ( !atom->live() && !atom->dontDeadStrip() )
-			it = _cstringTable.erase(it);
-		else
-			++it;
+		if (!atom->live() && !atom->dontDeadStrip()) {
+			cstringToRemove.push_back(atom);
+		}
+	}
+	for (auto it = cstringToRemove.cbegin(); it != cstringToRemove.cend(); ++it) {
+		_cstringTable.erase(*it);
 	}
 
 	// remove dead atoms from _utf16Table
-	for (UTF16StringToSlot::iterator it=_utf16Table.begin(); it != _utf16Table.end(); ) {
+	std::vector<const ld::Atom *> utf16ToRemove;
+	for (auto it = _utf16Table.begin(); it != _utf16Table.end(); ++it) {
 		const ld::Atom* atom = it->first;
 		assert(atom != NULL);
-		if ( !atom->live() && !atom->dontDeadStrip() )
-			it = _utf16Table.erase(it);
-		else
-			++it;
+		if (!atom->live() && !atom->dontDeadStrip()) {
+			utf16ToRemove.push_back(atom);
+		}
+	}
+	for (auto it = utf16ToRemove.cbegin(); it != utf16ToRemove.cend(); ++it) {
+		_utf16Table.erase(*it);
 	}
 
 	// remove dead atoms from _cfStringTable
-	for (ReferencesToSlot::iterator it=_cfStringTable.begin(); it != _cfStringTable.end(); ) {
+	std::vector<const ld::Atom *> cfStringToRemove;
+	for (auto it = _cfStringTable.begin(); it != _cfStringTable.end(); ++it) {
 		const ld::Atom* atom = it->first;
 		assert(atom != NULL);
-		if ( !atom->live() && !atom->dontDeadStrip() )
-			it = _cfStringTable.erase(it);
-		else
-			++it;
+		if (!atom->live() && !atom->dontDeadStrip()) {
+			cfStringToRemove.push_back(atom);
+		}
+	}
+	for (auto it = cfStringToRemove.cbegin(); it != cfStringToRemove.cend(); ++it) {
+		_cfStringTable.erase(*it);
 	}
 
 	// remove dead atoms from _literal4Table
-	for (ContentToSlot::iterator it=_literal4Table.begin(); it != _literal4Table.end(); ) {
+	std::vector<const ld::Atom *> literal4ToRemove;
+	for (auto it = _literal4Table.begin(); it != _literal4Table.end(); ++it) {
 		const ld::Atom* atom = it->first;
 		assert(atom != NULL);
-		if ( !atom->live() && !atom->dontDeadStrip() )
-			it = _literal4Table.erase(it);
-		else
-			++it;
+		if (!atom->live() && !atom->dontDeadStrip()) {
+			literal4ToRemove.push_back(atom);
+		}
+	}
+	for (auto it = literal4ToRemove.cbegin(); it != literal4ToRemove.cend(); ++it) {
+		_literal4Table.erase(*it);
 	}
 
 	// remove dead atoms from _literal8Table
-	for (ContentToSlot::iterator it=_literal8Table.begin(); it != _literal8Table.end(); ) {
+	std::vector<const ld::Atom *> literal8ToRemove;
+	for (auto it = _literal8Table.begin(); it != _literal8Table.end(); ++it) {
 		const ld::Atom* atom = it->first;
 		assert(atom != NULL);
-		if ( !atom->live() && !atom->dontDeadStrip() )
-			it = _literal8Table.erase(it);
-		else
-			++it;
+		if (!atom->live() && !atom->dontDeadStrip()) {
+			literal8ToRemove.push_back(atom);
+		}
+	}
+	for (auto it = literal8ToRemove.cbegin(); it != literal8ToRemove.cend(); ++it) {
+		_literal8Table.erase(*it);
 	}
 
 	// remove dead atoms from _literal16Table
-	for (ContentToSlot::iterator it=_literal16Table.begin(); it != _literal16Table.end(); ) {
+	std::vector<const ld::Atom *> literal16ToRemove;
+	for (auto it = _literal16Table.begin(); it != _literal16Table.end(); ++it) {
 		const ld::Atom* atom = it->first;
 		assert(atom != NULL);
-		if ( !atom->live() && !atom->dontDeadStrip() )
-			it = _literal16Table.erase(it);
-		else
-			++it;
+		if (!atom->live() && !atom->dontDeadStrip()) {
+			literal16ToRemove.push_back(atom);
+		}
+	}
+	for (auto it = literal16ToRemove.cbegin(); it != literal16ToRemove.cend(); ++it) {
+		_literal16Table.erase(*it);
 	}
 }
 
